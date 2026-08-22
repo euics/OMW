@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 
 import {
@@ -13,6 +13,7 @@ import {
   type PromptStatus,
 } from './features/prompt-board/types'
 import { usePromptBoard } from './features/prompt-board/usePromptBoard'
+import { useDialogFocus } from './features/prompt-board/useDialogFocus'
 
 const columns: Array<{
   id: PromptStatus
@@ -89,6 +90,9 @@ function App() {
   const [draggedPromptId, setDraggedPromptId] = useState<string | null>(null)
   const [isRunningDropActive, setRunningDropActive] = useState(false)
   const [announcement, setAnnouncement] = useState('')
+  const runDialogRef = useRef<HTMLElement>(null)
+  const runDialogCloseRef = useRef<HTMLButtonElement>(null)
+  useDialogFocus(Boolean(pendingRun), runDialogRef, runDialogCloseRef)
 
   const counts = useMemo(
     () => ({
@@ -442,12 +446,17 @@ function App() {
           }}
         >
           <section
+            ref={runDialogRef}
             className="run-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="run-dialog-title"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setPendingRun(null)
+            }}
           >
             <button
+              ref={runDialogCloseRef}
               className="dialog-close"
               type="button"
               aria-label="닫기"

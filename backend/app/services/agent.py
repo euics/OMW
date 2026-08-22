@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from agent_framework import AgentResponse, AgentResponseUpdate, ChatOptions, ResponseStream
 from agent_framework.exceptions import AgentException
@@ -100,10 +100,14 @@ class CopilotAgentService:
         fallback_model: str | None = None,
         agent: CopilotAgent | None = None,
     ) -> None:
-        options = GitHubCopilotOptions(
-            model=model,
-            timeout=timeout,
-            log_level=log_level,
+        options = cast(
+            GitHubCopilotOptions,
+            {
+                "model": model,
+                "timeout": timeout,
+                "log_level": log_level,
+                "available_tools": [],
+            },
         )
         if cli_path:
             options["cli_path"] = cli_path

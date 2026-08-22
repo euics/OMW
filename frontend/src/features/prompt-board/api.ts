@@ -14,6 +14,8 @@ type ApiErrorBody = {
   detail?: string | ApiValidationError[]
 }
 
+const REQUEST_TIMEOUT_MS = 15_000
+
 export class PromptApiError extends Error {
   constructor(
     message: string,
@@ -28,13 +30,38 @@ async function request<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
-  })
+  const controller = new AbortController()
+  let timedOut = false
+  const abortRequest = () => controller.abort(init?.signal?.reason)
+  if (init?.signal?.aborted) {
+    abortRequest()
+  } else {
+    init?.signal?.addEventListener('abort', abortRequest, { once: true })
+  }
+  const timeout = window.setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, REQUEST_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch(path, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...init?.headers,
+      },
+    })
+  } catch (error) {
+    if (timedOut) {
+      throw new PromptApiError('요청 시간이 초과되었습니다.', 408)
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
+    init?.signal?.removeEventListener('abort', abortRequest)
+  }
 
   if (!response.ok) {
     let message = '요청을 처리하지 못했습니다.'
@@ -59,8 +86,8 @@ async function request<T>(
 }
 
 export const promptApi = {
-  board: (pageSize: number) =>
-    request<PromptBoard>(`/api/prompts/board?pageSize=${pageSize}`),
+  board: (pageSize: number, signal?: AbortSignal) =>
+    request<PromptBoard>(`/api/prompts/board?pageSize=${pageSize}`, { signal }),
 
   events: (id: string) => `/api/prompts/${id}/events`,
 

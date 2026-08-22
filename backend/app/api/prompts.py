@@ -3,12 +3,15 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     Response,
     status,
 )
 from fastapi.responses import StreamingResponse
 import json
 
+from app.core.config import get_settings
+from app.core.rate_limit import SlidingWindowRateLimiter
 from app.repositories.prompts import PromptNotFoundError, PromptStateConflictError
 from app.schemas.prompt import (
     PromptBoard,
@@ -21,6 +24,26 @@ from app.schemas.prompt import (
 from app.services.prompts import PromptService, get_prompt_service
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
+settings = get_settings()
+execution_rate_limiter = SlidingWindowRateLimiter(
+    limit=settings.execute_rate_limit,
+    window_seconds=settings.execute_rate_window_seconds,
+)
+
+
+def enforce_execution_rate_limit(request: Request) -> None:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded_for.rsplit(",", 1)[-1].strip()
+    if not client_ip and request.client:
+        client_ip = request.client.host
+
+    allowed, retry_after = execution_rate_limiter.allow(client_ip or "unknown")
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="실행 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(retry_after)},
+        )
 
 
 def raise_prompt_http_error(error: Exception) -> None:
@@ -99,8 +122,10 @@ def delete_prompt(
 )
 async def execute_prompt(
     prompt_id: str,
+    request: Request,
     service: PromptService = Depends(get_prompt_service),
 ) -> PromptRead:
+    enforce_execution_rate_limit(request)
     try:
         prompt = await service.start_execution(prompt_id)
     except (PromptNotFoundError, PromptStateConflictError) as error:

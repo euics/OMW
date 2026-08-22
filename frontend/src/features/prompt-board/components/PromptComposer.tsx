@@ -8,6 +8,7 @@ import {
   type PromptFormValues,
   type PromptItem,
 } from '../types'
+import { useDialogFocus } from '../useDialogFocus'
 import { Icon } from './Icon'
 
 type PromptComposerProps = {
@@ -28,7 +29,9 @@ export function PromptComposer({
   const [submitted, setSubmitted] = useState(false)
   const [isSaving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const drawerRef = useRef<HTMLElement>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
+  useDialogFocus(open, drawerRef, titleInputRef)
 
   useEffect(() => {
     if (!open) return
@@ -46,11 +49,6 @@ export function PromptComposer({
     setSaving(false)
     setSubmitError(null)
 
-    const focusTimer = window.setTimeout(
-      () => titleInputRef.current?.focus(),
-      120,
-    )
-    return () => window.clearTimeout(focusTimer)
   }, [open, prompt])
 
   useEffect(() => {
@@ -101,6 +99,7 @@ export function PromptComposer({
       }}
     >
       <aside
+        ref={drawerRef}
         className="prompt-drawer"
         role="dialog"
         aria-modal="true"

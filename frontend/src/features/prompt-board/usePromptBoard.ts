@@ -103,6 +103,10 @@ function isPromptEvent(
   )
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
 export function usePromptBoard() {
   const [columns, setColumns] =
     useState<Record<PromptStatus, PromptPage>>(emptyColumns)
@@ -118,6 +122,7 @@ export function usePromptBoard() {
   >({})
   const eventSourcesRef = useRef<Map<string, EventSource>>(new Map())
   const terminalExecutionIdsRef = useRef<Set<string>>(new Set())
+  const refreshControllerRef = useRef<AbortController | null>(null)
 
   const runningPromptIds = useMemo(
     () => columns.running.items.map((prompt) => prompt.id),
@@ -172,19 +177,26 @@ export function usePromptBoard() {
   )
 
   const refreshPrompts = useCallback(async (showLoading = false) => {
+    refreshControllerRef.current?.abort()
+    const controller = new AbortController()
+    refreshControllerRef.current = controller
     if (showLoading) setIsLoading(true)
     try {
-      const board = await promptApi.board(PAGE_SIZE)
+      const board = await promptApi.board(PAGE_SIZE, controller.signal)
       setColumns((current) =>
         showLoading ? board.columns : mergeColumns(current, board.columns),
       )
       setAwaitingExecutionRefresh(false)
       setErrorMessage(null)
     } catch (error) {
+      if (isAbortError(error)) return
       setErrorMessage(getErrorMessage(error))
       throw error
     } finally {
-      if (showLoading) setIsLoading(false)
+      if (refreshControllerRef.current === controller) {
+        refreshControllerRef.current = null
+        if (showLoading) setIsLoading(false)
+      }
     }
   }, [])
 
@@ -264,6 +276,7 @@ export function usePromptBoard() {
 
   useEffect(() => {
     void refreshPrompts(true).catch(() => undefined)
+    return () => refreshControllerRef.current?.abort()
   }, [refreshPrompts])
 
   useEffect(() => {
