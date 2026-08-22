@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: production
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -102,7 +102,12 @@ jobs:
       - name: Build and push image
         run: |
           IMAGE="$DOCKER_USERNAME/onmyway-${{ matrix.component }}"
-          docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" "./${{ matrix.component }}"
+          docker build \
+            --label com.onmyway.application=true \
+            --label "com.onmyway.component=${{ matrix.component }}" \
+            -t "$IMAGE:$GITHUB_SHA" \
+            -t "$IMAGE:latest" \
+            "./${{ matrix.component }}"
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
 
@@ -112,6 +117,7 @@ jobs:
       - backend-test
       - frontend-test
     runs-on: ubuntu-latest
+    environment: production
     env:
       AZURE_HOST: ${{ secrets.AZURE_HOST }}
       AZURE_SSH_USER: ${{ secrets.AZURE_SSH_USER }}
@@ -140,10 +146,184 @@ jobs:
       - name: Deploy FE and BE
         run: |
           SSH_TARGET="${AZURE_SSH_USER}@${AZURE_HOST}"
-          echo "$DOCKER_TOKEN" | ssh "$SSH_TARGET" "docker login -u '$DOCKER_USERNAME' --password-stdin"
-          ssh "$SSH_TARGET" \
-            "DOCKER_USERNAME='$DOCKER_USERNAME' IMAGE_TAG='$GITHUB_SHA' DB_PASSWORD='$DB_PASSWORD' AZURE_HOST='$AZURE_HOST' bash -s" <<'DEPLOY'
-          set -e
+          DEPLOY_PAYLOAD="$(
+            printf '%s\0%s\0%s\0%s\0%s\0' \
+              "$DOCKER_USERNAME" "$DOCKER_TOKEN" "$GITHUB_SHA" "$DB_PASSWORD" "$AZURE_HOST" |
+              base64 | tr -d '\n'
+          )"
+          {
+            printf '%s\n' "$DEPLOY_PAYLOAD"
+            cat <<'DEPLOY'
+          set -Eeuo pipefail
+
+          {
+            IFS= read -r -d '' DOCKER_USERNAME
+            IFS= read -r -d '' DOCKER_TOKEN
+            IFS= read -r -d '' IMAGE_TAG
+            IFS= read -r -d '' DB_PASSWORD
+            IFS= read -r -d '' AZURE_HOST
+          } < <(printf '%s' "$DEPLOY_PAYLOAD" | base64 --decode)
+          unset DEPLOY_PAYLOAD
+
+          DOCKER_CONFIG="$(mktemp -d "${TMPDIR:-/tmp}/onmyway-docker-config.XXXXXXXX")"
+          chmod 700 "$DOCKER_CONFIG"
+          export DOCKER_CONFIG
+
+          cleanup_registry_auth() {
+            cleanup_status=$?
+            trap - EXIT
+            set +e
+            docker logout >/dev/null 2>&1
+            rm -rf -- "$DOCKER_CONFIG"
+            exit "$cleanup_status"
+          }
+          trap cleanup_registry_auth EXIT
+
+          printf '%s' "$DOCKER_TOKEN" | docker login -u "$DOCKER_USERNAME" --password-stdin
+          unset DOCKER_TOKEN
+
+          previous_backend_ref="$(docker inspect --format '{{if .State.Running}}{{.Config.Image}}{{end}}' onmyway-backend 2>/dev/null || true)"
+          previous_frontend_ref="$(docker inspect --format '{{if .State.Running}}{{.Config.Image}}{{end}}' onmyway-frontend 2>/dev/null || true)"
+          previous_backend_id="$(docker inspect --format '{{if .State.Running}}{{.Image}}{{end}}' onmyway-backend 2>/dev/null || true)"
+          previous_frontend_id="$(docker inspect --format '{{if .State.Running}}{{.Image}}{{end}}' onmyway-frontend 2>/dev/null || true)"
+          replacement_started=false
+
+          echo "Current backend image: ${previous_backend_ref:-none}"
+          echo "Current frontend image: ${previous_frontend_ref:-none}"
+
+          run_backend() {
+            docker run -d \
+              --name onmyway-backend \
+              --restart unless-stopped \
+              --network onmyway-app \
+              --network-alias backend \
+              -e APP_ENV=production \
+              -e FRONTEND_ORIGIN="http://$AZURE_HOST" \
+              -e DATABASE_PASSWORD="$DB_PASSWORD" \
+              "$1"
+          }
+
+          run_frontend() {
+            docker run -d \
+              --name onmyway-frontend \
+              --restart unless-stopped \
+              --network onmyway-app \
+              -p 80:80 \
+              "$1"
+          }
+
+          verify_containers() {
+            for attempt in $(seq 1 45); do
+              backend_status="$(docker inspect --format '{{.State.Status}}' onmyway-backend 2>/dev/null || echo missing)"
+              frontend_status="$(docker inspect --format '{{.State.Status}}' onmyway-frontend 2>/dev/null || echo missing)"
+              backend_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' onmyway-backend 2>/dev/null || echo missing)"
+              frontend_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' onmyway-frontend 2>/dev/null || echo missing)"
+
+              if [ "$backend_status" = running ] && [ "$frontend_status" = running ] &&
+                 [ "$backend_health" = healthy ] && [ "$frontend_health" = healthy ]; then
+                return 0
+              fi
+              if [ "$backend_status" = exited ] || [ "$backend_status" = dead ] ||
+                 [ "$frontend_status" = exited ] || [ "$frontend_status" = dead ]; then
+                break
+              fi
+              sleep 2
+            done
+
+            echo "Container verification failed: backend=$backend_status/$backend_health frontend=$frontend_status/$frontend_health" >&2
+            return 1
+          }
+
+          diagnose() {
+            echo "Deployment diagnostics (bounded output):" >&2
+            docker ps -a \
+              --filter name=onmyway-backend \
+              --filter name=onmyway-frontend \
+              --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}' 2>&1 |
+              head -c 16384 || true
+            printf '\nBackend logs (last 100 lines, max 32 KiB):\n' >&2
+            timeout 10 docker logs --tail 100 onmyway-backend 2>&1 |
+              tail -n 100 | head -c 32768 || true
+            printf '\nFrontend logs (last 100 lines, max 32 KiB):\n' >&2
+            timeout 10 docker logs --tail 100 onmyway-frontend 2>&1 |
+              tail -n 100 | head -c 32768 || true
+            printf '\n' >&2
+          }
+
+          handle_failure() {
+            failure_status=$?
+            trap - ERR
+            set +e
+
+            if [ "$replacement_started" = true ]; then
+              diagnose
+              if [ -n "$previous_backend_id" ] && [ -n "$previous_frontend_id" ] &&
+                 docker image inspect "$previous_backend_id" >/dev/null 2>&1 &&
+                 docker image inspect "$previous_frontend_id" >/dev/null 2>&1; then
+                echo "Restoring backend $previous_backend_ref and frontend $previous_frontend_ref" >&2
+                rollback_status=0
+                docker rm -f onmyway-backend onmyway-frontend >/dev/null 2>&1 || true
+                run_backend "$previous_backend_id" >/dev/null || rollback_status=1
+                run_frontend "$previous_frontend_id" >/dev/null || rollback_status=1
+                if [ "$rollback_status" -eq 0 ] &&
+                   verify_containers &&
+                   curl --retry 5 --retry-delay 2 --retry-all-errors \
+                     --fail --silent --show-error http://127.0.0.1/api/health >/dev/null; then
+                  echo "Rollback verified successfully." >&2
+                else
+                  echo "::error::Rollback was attempted but could not be verified." >&2
+                fi
+              else
+                echo "::error::No complete previous deployment exists; rollback is unavailable." >&2
+                docker rm -f onmyway-backend onmyway-frontend >/dev/null 2>&1 || true
+              fi
+            fi
+
+            exit "$failure_status"
+          }
+
+          prune_old_onmyway_images() {
+            current_backend_id="$(docker inspect --format '{{.Image}}' onmyway-backend)"
+            current_frontend_id="$(docker inspect --format '{{.Image}}' onmyway-frontend)"
+            used_image_ids="$(
+              container_ids="$(docker ps -aq)"
+              if [ -n "$container_ids" ]; then
+                docker inspect --format '{{.Image}}' $container_ids
+              fi
+            )"
+
+            image_is_kept() {
+              [ "$1" = "$current_backend_id" ] ||
+                [ "$1" = "$current_frontend_id" ] ||
+                { [ -n "$previous_backend_id" ] && [ "$1" = "$previous_backend_id" ]; } ||
+                { [ -n "$previous_frontend_id" ] && [ "$1" = "$previous_frontend_id" ]; }
+            }
+
+            while IFS= read -r image_id; do
+              [ -n "$image_id" ] || continue
+              if image_is_kept "$image_id"; then
+                continue
+              fi
+
+              image_is_used=false
+              while IFS= read -r used_image_id; do
+                if [ "$image_id" = "$used_image_id" ]; then
+                  image_is_used=true
+                  break
+                fi
+              done <<<"$used_image_ids"
+              [ "$image_is_used" = false ] || continue
+
+              docker image rm "$image_id" >/dev/null ||
+                echo "::warning::Could not remove old OnMyWay image $image_id." >&2
+            done < <(
+              docker image ls -aq --no-trunc \
+                --filter label=com.onmyway.application=true |
+                sort -u
+            )
+          }
+
+          trap handle_failure ERR
 
           docker pull "$DOCKER_USERNAME/onmyway-backend:$IMAGE_TAG"
           docker pull "$DOCKER_USERNAME/onmyway-frontend:$IMAGE_TAG"
@@ -151,29 +331,21 @@ jobs:
           docker network inspect onmyway-app >/dev/null 2>&1 || docker network create onmyway-app
           docker network connect onmyway-app onmyway-mysql 2>/dev/null || true
 
+          replacement_started=true
           docker rm -f onmyway-backend onmyway-frontend 2>/dev/null || true
 
-          docker run -d \
-            --name onmyway-backend \
-            --restart unless-stopped \
-            --network onmyway-app \
-            --network-alias backend \
-            -e APP_ENV=production \
-            -e FRONTEND_ORIGIN="http://$AZURE_HOST" \
-            -e DATABASE_PASSWORD="$DB_PASSWORD" \
-            "$DOCKER_USERNAME/onmyway-backend:$IMAGE_TAG"
+          run_backend "$DOCKER_USERNAME/onmyway-backend:$IMAGE_TAG"
+          run_frontend "$DOCKER_USERNAME/onmyway-frontend:$IMAGE_TAG"
 
-          docker run -d \
-            --name onmyway-frontend \
-            --restart unless-stopped \
-            --network onmyway-app \
-            -p 80:80 \
-            "$DOCKER_USERNAME/onmyway-frontend:$IMAGE_TAG"
-
+          verify_containers
           curl --retry 15 --retry-delay 2 --retry-all-errors \
             --fail --silent --show-error http://127.0.0.1/api/health
-          docker image prune -f
+          trap - ERR
+          prune_old_onmyway_images ||
+            echo "::warning::Image retention cleanup failed after the deployment was verified." >&2
           DEPLOY
+          } | ssh "$SSH_TARGET" \
+            'IFS= read -r DEPLOY_PAYLOAD; export DEPLOY_PAYLOAD; exec bash -s'
 
       - name: Remove SSH key
         if: always()
