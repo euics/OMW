@@ -48,6 +48,7 @@ jobs:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      COPILOT_TOKEN: ${{ secrets.COPILOT_TOKEN }}
 
     steps:
       - name: Validate deployment secrets
@@ -58,6 +59,7 @@ jobs:
           test -n "$DOCKER_USERNAME"
           test -n "$DOCKER_TOKEN"
           test -n "$DB_PASSWORD"
+          test -n "$COPILOT_TOKEN"
 
       - name: Configure SSH
         run: |
@@ -71,7 +73,7 @@ jobs:
           SSH_TARGET="${AZURE_SSH_USER}@${AZURE_HOST}"
           echo "$DOCKER_TOKEN" | ssh "$SSH_TARGET" "docker login -u '$DOCKER_USERNAME' --password-stdin"
           ssh "$SSH_TARGET" \
-            "DOCKER_USERNAME='$DOCKER_USERNAME' IMAGE_TAG='$GITHUB_SHA' DB_PASSWORD='$DB_PASSWORD' AZURE_HOST='$AZURE_HOST' bash -s" <<'DEPLOY'
+            "DOCKER_USERNAME='$DOCKER_USERNAME' IMAGE_TAG='$GITHUB_SHA' DB_PASSWORD='$DB_PASSWORD' COPILOT_TOKEN='$COPILOT_TOKEN' AZURE_HOST='$AZURE_HOST' bash -s" <<'DEPLOY'
           set -e
 
           docker pull "$DOCKER_USERNAME/onmyway-backend:$IMAGE_TAG"
@@ -90,6 +92,7 @@ jobs:
             -e APP_ENV=production \
             -e FRONTEND_ORIGIN="http://$AZURE_HOST" \
             -e DATABASE_PASSWORD="$DB_PASSWORD" \
+            -e GITHUB_COPILOT_TOKEN="$COPILOT_TOKEN" \
             "$DOCKER_USERNAME/onmyway-backend:$IMAGE_TAG"
 
           docker run -d \
