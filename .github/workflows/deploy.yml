@@ -41,7 +41,6 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment: production
     env:
       AZURE_HOST: ${{ secrets.AZURE_HOST }}
       AZURE_SSH_USER: ${{ secrets.AZURE_SSH_USER }}

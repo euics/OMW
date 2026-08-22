@@ -38,13 +38,15 @@ npm run dev
 
 `main` 브랜치에 푸시하면 GitHub Actions가 FE/BE 이미지를 각각 Docker Hub에
 게시한 뒤 Azure VM에서 이미지를 pull해 두 앱 컨테이너만 배포합니다. GitHub
-저장소의 `production` 환경에 다음 시크릿을 등록해야 합니다.
+저장소의 `Settings → Secrets and variables → Actions → Repository secrets`에
+다음 시크릿을 등록해야 합니다.
 
 - `AZURE_HOST`: Azure VM 공인 IP
 - `AZURE_SSH_USER`: Azure VM SSH 사용자
 - `AZURE_SSH_PRIVATE_KEY`: 해당 사용자의 SSH 개인 키
 - `DOCKER_USERNAME`: Docker Hub 사용자명
 - `DOCKER_TOKEN`: Docker Hub 액세스 토큰
+- `DB_PASSWORD`: MySQL `omw` 사용자 비밀번호
 
 Azure VM의 홈 디렉터리에는 `backend`, `frontend` 서비스와 기존 MySQL 연결 설정이
 포함된 Compose 파일이 있어야 합니다. CI는 이 파일을 수정하지 않고 두 앱 이미지만
