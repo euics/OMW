@@ -36,19 +36,19 @@ npm run dev
 
 ## 배포
 
-`main` 브랜치에 푸시하면 GitHub Actions가 FE/BE 이미지를 각각 GHCR에 게시한 뒤
-Azure VM(`20.41.104.203`)에 두 앱 컨테이너만 배포합니다. GitHub 저장소의
-`production` 환경에 다음 시크릿을 등록해야 합니다.
+`main` 브랜치에 푸시하면 GitHub Actions가 FE/BE 이미지를 각각 Docker Hub에
+게시한 뒤 Azure VM에서 이미지를 pull해 두 앱 컨테이너만 배포합니다. GitHub
+저장소의 `production` 환경에 다음 시크릿을 등록해야 합니다.
 
+- `AZURE_HOST`: Azure VM 공인 IP
 - `AZURE_SSH_USER`: Azure VM SSH 사용자
 - `AZURE_SSH_PRIVATE_KEY`: 해당 사용자의 SSH 개인 키
-- `DB_PASSWORD`: 운영 MySQL의 `matdathon` 사용자 비밀번호
-- `COPILOT_TOKEN`: 배포된 Copilot SDK가 사용할 GitHub 토큰
+- `DOCKER_USERNAME`: Docker Hub 사용자명
+- `DOCKER_TOKEN`: Docker Hub 액세스 토큰
 
-`production` 환경 변수 `DB_DOCKER_NETWORK`에는 서버에서 MySQL Compose가 사용
-중인 Docker 네트워크 이름을 등록합니다. 미등록 시 `matdathon_default`를 사용합니다.
-백엔드는 해당 네트워크의 `mysql:3306`으로 접속하며 외부에는 웹 포트 `80`만
-노출됩니다.
+Azure VM의 `~/onmyway`에는 `backend`, `frontend` 서비스와 기존 MySQL 연결 설정이
+포함된 Compose 파일이 있어야 합니다. CI는 이 파일을 수정하지 않고 두 앱 이미지만
+pull한 뒤 재기동합니다.
 
 ## 프롬프트 API
 

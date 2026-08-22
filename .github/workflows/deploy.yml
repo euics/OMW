@@ -16,9 +16,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    env:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
     strategy:
       matrix:
         component:
@@ -28,14 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to GHCR
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Log in to Docker Hub
+        run: echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
       - name: Build and push image
         run: |
-          IMAGE="$(echo "ghcr.io/${GITHUB_REPOSITORY}-${{ matrix.component }}" | tr '[:upper:]' '[:lower:]')"
+          IMAGE="$DOCKER_USERNAME/onmyway-${{ matrix.component }}"
           docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" "./${{ matrix.component }}"
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
@@ -44,26 +42,21 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment: production
-    permissions:
-      contents: read
-      packages: read
     env:
-      AZURE_HOST: 20.41.104.203
+      AZURE_HOST: ${{ secrets.AZURE_HOST }}
       AZURE_SSH_USER: ${{ secrets.AZURE_SSH_USER }}
       AZURE_SSH_PRIVATE_KEY: ${{ secrets.AZURE_SSH_PRIVATE_KEY }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      COPILOT_TOKEN: ${{ secrets.COPILOT_TOKEN }}
-      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      DB_DOCKER_NETWORK: ${{ vars.DB_DOCKER_NETWORK || 'matdathon_default' }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
 
     steps:
       - name: Validate deployment secrets
         run: |
+          test -n "$AZURE_HOST"
           test -n "$AZURE_SSH_USER"
           test -n "$AZURE_SSH_PRIVATE_KEY"
-          test -n "$DB_PASSWORD"
-          test -n "$COPILOT_TOKEN"
-          test -n "$DB_DOCKER_NETWORK"
+          test -n "$DOCKER_USERNAME"
+          test -n "$DOCKER_TOKEN"
 
       - name: Configure SSH
         run: |
@@ -72,80 +65,18 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$AZURE_HOST" >> ~/.ssh/known_hosts
 
-      - name: Prepare production configuration
-        run: |
-          IMAGE_PREFIX="$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-          FRONTEND_IMAGE="${IMAGE_PREFIX}-frontend:${GITHUB_SHA}"
-          BACKEND_IMAGE="${IMAGE_PREFIX}-backend:${GITHUB_SHA}"
-
-          cat > compose.production.yml <<EOF
-          services:
-            backend:
-              image: ${BACKEND_IMAGE}
-              restart: unless-stopped
-              environment:
-                APP_ENV: production
-                FRONTEND_ORIGIN: http://${AZURE_HOST}
-                DATABASE_HOST: mysql
-                DATABASE_PORT: 3306
-                DATABASE_NAME: matdathon
-                DATABASE_USER: matdathon
-                DATABASE_PASSWORD: \${MYSQL_PASSWORD}
-                GITHUB_COPILOT_MODEL: auto
-                GITHUB_COPILOT_TOKEN: \${GITHUB_COPILOT_TOKEN}
-                GITHUB_COPILOT_TIMEOUT: 60
-                GITHUB_COPILOT_LOG_LEVEL: info
-                GITHUB_COPILOT_BASE_DIRECTORY: /tmp/copilot
-                TZ: Asia/Seoul
-              expose:
-                - "8000"
-              networks:
-                - app-network
-
-            frontend:
-              image: ${FRONTEND_IMAGE}
-              restart: unless-stopped
-              depends_on:
-                backend:
-                  condition: service_healthy
-              ports:
-                - "80:80"
-              networks:
-                - app-network
-
-          networks:
-            app-network:
-              external: true
-              name: \${DB_DOCKER_NETWORK}
-          EOF
-
-          {
-            printf 'MYSQL_PASSWORD=%s\n' "$DB_PASSWORD"
-            printf 'GITHUB_COPILOT_TOKEN=%s\n' "$COPILOT_TOKEN"
-            printf 'DB_DOCKER_NETWORK=%s\n' "$DB_DOCKER_NETWORK"
-          } > .env.production
-          chmod 600 .env.production
-
-      - name: Upload deployment configuration
-        run: |
-          SSH_TARGET="${AZURE_SSH_USER}@${AZURE_HOST}"
-          ssh "$SSH_TARGET" 'mkdir -p ~/onmyway'
-          scp compose.production.yml .env.production "$SSH_TARGET:~/onmyway/"
-
       - name: Deploy FE and BE
         run: |
           SSH_TARGET="${AZURE_SSH_USER}@${AZURE_HOST}"
-          printf '%s' "$GHCR_TOKEN" | ssh "$SSH_TARGET" "docker login ghcr.io -u '$GITHUB_ACTOR' --password-stdin"
+          echo "$DOCKER_TOKEN" | ssh "$SSH_TARGET" "docker login -u '$DOCKER_USERNAME' --password-stdin"
           ssh "$SSH_TARGET" '
             cd ~/onmyway &&
-            chmod 600 .env.production &&
-            docker compose --env-file .env.production -f compose.production.yml config >/dev/null &&
-            docker compose --env-file .env.production -f compose.production.yml pull backend frontend &&
-            docker compose --env-file .env.production -f compose.production.yml up -d backend frontend --wait &&
+            docker compose pull backend frontend &&
+            docker compose up -d backend frontend --wait &&
             curl --fail --silent --show-error http://127.0.0.1/api/health &&
             docker image prune -f
           '
 
-      - name: Remove local secret file
+      - name: Remove SSH key
         if: always()
-        run: rm -f .env.production ~/.ssh/id_ed25519
+        run: rm -f ~/.ssh/id_ed25519
