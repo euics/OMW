@@ -1,0 +1,49 @@
+{
+  "max_loops": 5,
+  "agent_timeout_seconds": 1800,
+  "agent_env_allowlist": [
+    "LANG",
+    "LC_ALL",
+    "LOGNAME",
+    "NO_COLOR",
+    "PATH",
+    "SHELL",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TERM",
+    "TMPDIR",
+    "USER"
+  ],
+  "context": {
+    "max_files": 40,
+    "max_bytes": 200000,
+    "max_markdown_lines": 180,
+    "max_markdown_bytes": 20000,
+    "always_include": [
+      "README.md"
+    ]
+  },
+  "agent_command": [
+    "codex",
+    "exec",
+    "--cd",
+    "{workspace}",
+    "--skip-git-repo-check",
+    "--sandbox",
+    "{sandbox}",
+    "--output-last-message",
+    "{output}",
+    "-"
+  ],
+  "qa_commands": [
+    ["npm", "run", "build"],
+    [
+      "/usr/bin/env",
+      "DATABASE_PASSWORD=harness-test",
+      "backend/.venv/bin/python",
+      "-m",
+      "pytest",
+      "backend/tests/test_agent_service.py"
+    ]
+  ]
+}
