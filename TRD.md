@@ -61,10 +61,14 @@ FastAPI
 
 **에이전트 하네스**
 
-- `GitHubCopilotAgent` 생명주기 관리
+- Planner, Executor, Reviewer 역할별 `GitHubCopilotAgent` 생명주기 관리
 - 서버 설정으로 모델, 타임아웃, 로그 수준 구성
 - 각 프롬프트 실행을 독립된 Copilot 세션에서 처리
-- SDK 시작·실행 오류와 빈 응답을 명시적인 서비스 오류로 변환
+- `run(..., stream=True)`로 응답 스트림을 수집하고 최종 응답을 저장
+- 단계 이벤트와 Executor 응답 조각을 SSE로 전달
+- SDK 시작·실행 오류, 시간 초과와 빈 응답을 재시도한 뒤 실패로 변환
+- JSON 출력은 파싱 후 정규화하고, 잘못된 JSON은 실패로 처리
+- 실행 취소는 프로세스 로컬 코디네이터가 추적하고, 서버 재시작 시 안전하게 정리
 
 **저장소**
 
@@ -82,29 +86,33 @@ GitHub 토큰으로 생성한 Copilot SDK `CopilotClient`를 주입한다.
 
 ```text
 PromptService
-  → CopilotAgentService
-      → GitHubCopilotAgent
-          → CopilotClient
+  → PromptOrchestrator
+      ├─ PlannerAgent
+      ├─ ExecutorAgent
+      └─ ReviewerAgent
+           → CopilotAgentService
+               → GitHubCopilotAgent
+                   → CopilotClient
 ```
 
 ### 실행 생명주기
 
-1. 최초 요청에서 에이전트를 한 번 시작한다.
-2. 프롬프트마다 독립적인 세션을 생성한다.
-3. 제목, 사용자 프롬프트와 출력 형식 지침을 하나의 요청으로 구성한다.
-4. Agent Framework의 `run`으로 실행한다.
-5. 응답을 검증해 완료 결과로 저장한다.
-6. 종료 시 에이전트와 직접 생성한 SDK 클라이언트를 정리한다.
+1. Planner가 요청을 구조화된 계획으로 변환한다.
+2. Executor가 독립 세션에서 계획을 실행하며 응답 조각을 스트리밍한다.
+3. Reviewer가 구조화된 판정으로 결과와 수용 기준을 검증한다.
+4. `REVISE` 판정이면 피드백을 반영해 Executor를 최대 한 번 재실행한다.
+5. 최종 결과와 단계 상태를 저장하고 SSE 구독자에게 종료 이벤트를 전달한다.
+6. 각 Agent Framework 호출은 재시도와 백오프로 일시적 실패를 처리한다.
+7. 종료 시 에이전트와 직접 생성한 SDK 클라이언트를 정리한다.
 
 ### 현재 의도
 
-현재 제품의 작업들은 서로 의존하지 않으므로 멀티 에이전트 순차 오케스트레이션을
-강제하지 않는다. 독립 세션을 통해 여러 작업을 운영하고 상태를 통합하는 것이
-현재 하네스의 핵심이다.
+각 작업은 Planner, Executor, Reviewer의 제한된 순차 오케스트레이션을 사용한다.
+Reviewer 피드백 루프는 최대 한 번으로 제한하며, 서로 다른 작업은 독립 세션과
+이벤트 채널을 사용해 병렬 실행한다.
 
 ### 확장 방향
 
-- 실행 이벤트 스트리밍과 진행 로그
 - 작업별 Copilot 세션 ID 저장 및 후속 요청
 - 작업 의존성 기반 순차·병렬 오케스트레이션
 - 허용 목록 기반 읽기 전용 도구 호출
@@ -168,6 +176,8 @@ prompts
 | `PATCH` | `/api/prompts/{id}` | 미실행·실패 프롬프트 수정 |
 | `DELETE` | `/api/prompts/{id}` | 미실행·실패 프롬프트 삭제 |
 | `POST` | `/api/prompts/{id}/execute` | 실행을 예약하고 `202` 반환 |
+| `POST` | `/api/prompts/{id}/cancel` | 진행중 실행을 취소하고 상태를 갱신 |
+| `GET` | `/api/prompts/{id}/events` | 에이전트 단계와 Executor 응답을 SSE로 전달 |
 
 ### 입력 제약
 
@@ -195,8 +205,8 @@ prompts
 - 프롬프트 상태 변경은 `WHERE id = ? AND status IN (...)` 조건으로 수행한다.
 - 영향받은 행이 없으면 존재 여부를 확인해 `404`와 `409`를 구분한다.
 - 각 데이터베이스 작업은 성공 시 커밋하고 예외 시 롤백한다.
-- 프론트엔드는 실행 요청 직후와 진행중 작업이 존재하는 동안 2초 간격으로 보드를
-  갱신한다.
+- 프론트엔드는 작업별 SSE를 구독하고, 연결 실패 시 2초 간격 보드 조회를 복구
+  경로로 유지한다.
 - 상태별 추가 페이지를 불러올 때 기존 항목과 새 항목을 병합한다.
 
 ## 8. 오류 처리
@@ -206,8 +216,11 @@ prompts
 | 존재하지 않는 작업 | `404 Not Found` |
 | 허용되지 않은 상태 변경 | `409 Conflict` |
 | 잘못된 입력 | `422 Unprocessable Entity` |
-| Agent Framework 시작·실행 실패 | 작업을 `failed`로 저장 |
-| 빈 Copilot 응답 | 작업을 `failed`로 저장 |
+| Agent Framework 시작·실행 실패 | 재시도 후 작업을 `failed`로 저장 |
+| 타임아웃 | 재시도 후 작업을 `failed`로 저장 |
+| 빈 Copilot 응답 | 재시도 후 작업을 `failed`로 저장 |
+| 잘못된 JSON 응답 | 작업을 `failed`로 저장 |
+| 실행 취소 | 작업을 `failed`로 저장하고 취소 사유를 남김 |
 | 예상하지 못한 실행 오류 | 내부 로그 기록 후 일반화된 오류 저장 |
 | 서버 재시작 중 실행 중단 | 시작 시 `failed`로 복구 |
 
@@ -264,6 +277,9 @@ VM 내부의 `http://127.0.0.1/api/health` 요청이 성공하는 것이다.
 - 프롬프트 생성, 조회, 수정, 삭제
 - 클라이언트 모델 선택 거부
 - 성공·실패 실행 결과 저장
+- 스트리밍 응답 수집, 재시도와 fallback 모델 선택
+- JSON 출력 검증
+- 실행 취소
 - 동시 실행 충돌
 - 서버 재시작 후 중단 작업 복구
 - 상태별 페이지 조회

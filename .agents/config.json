@@ -1,0 +1,54 @@
+{
+  "max_loops": 5,
+  "agent_timeout_seconds": 1800,
+  "agent_env_allowlist": [
+    "LANG",
+    "LC_ALL",
+    "GITHUB_COPILOT_CLI_PATH",
+    "GITHUB_COPILOT_FALLBACK_MODEL",
+    "GITHUB_COPILOT_INSTRUCTIONS",
+    "GITHUB_COPILOT_LOG_LEVEL",
+    "GITHUB_COPILOT_MODEL",
+    "GITHUB_COPILOT_RETRY_ATTEMPTS",
+    "GITHUB_COPILOT_RETRY_BACKOFF_MULTIPLIER",
+    "GITHUB_COPILOT_RETRY_BACKOFF_SECONDS",
+    "GITHUB_COPILOT_RETRY_MAX_BACKOFF_SECONDS",
+    "GITHUB_COPILOT_TIMEOUT",
+    "GITHUB_COPILOT_TOKEN",
+    "LOGNAME",
+    "NO_COLOR",
+    "PATH",
+    "SHELL",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TERM",
+    "TMPDIR",
+    "USER"
+  ],
+  "context": {
+    "max_files": 40,
+    "max_bytes": 200000,
+    "max_markdown_lines": 180,
+    "max_markdown_bytes": 20000,
+    "always_include": [
+      "README.md"
+    ]
+  },
+  "agent_command": [
+    "{repo}/backend/.venv/bin/python",
+    "{repo}/.agents/bin/copilot-role-adapter.py",
+    "{role}",
+    "{output}"
+  ],
+  "qa_commands": [
+    ["npm", "run", "build"],
+    [
+      "/usr/bin/env",
+      "DATABASE_PASSWORD=harness-test",
+      "backend/.venv/bin/python",
+      "-m",
+      "pytest",
+      "backend/tests/test_agent_service.py"
+    ]
+  ]
+}

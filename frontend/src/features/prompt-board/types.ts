@@ -1,5 +1,27 @@
 export type PromptStatus = 'draft' | 'running' | 'completed' | 'failed'
 export type OutputFormat = 'markdown' | 'plainText' | 'json'
+export type OrchestrationStage = 'planner' | 'executor' | 'reviewer'
+
+export type PromptStreamEventType =
+  | 'stage'
+  | 'chunk'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export type PromptStreamEvent = {
+  type: PromptStreamEventType
+  stage: OrchestrationStage | null
+  message: string
+}
+
+export type PromptExecutionState = {
+  stage: OrchestrationStage | null
+  stageMessage: string
+  streamedText: string
+  isCancelling: boolean
+  cancelError: string | null
+}
 
 export type PromptFormValues = {
   title: string

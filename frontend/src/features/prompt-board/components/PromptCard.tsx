@@ -1,6 +1,11 @@
 import type { DragEvent } from 'react'
 
-import { OUTPUT_FORMAT_LABELS, type PromptItem } from '../types'
+import {
+  OUTPUT_FORMAT_LABELS,
+  type OrchestrationStage,
+  type PromptExecutionState,
+  type PromptItem,
+} from '../types'
 import { Icon } from './Icon'
 
 type PromptCardProps = {
@@ -9,8 +14,10 @@ type PromptCardProps = {
   onEdit: () => void
   onDelete: () => void
   onRun: () => void
+  onCancel: () => void
   onDragStart: (event: DragEvent<HTMLElement>) => void
   onDragEnd: () => void
+  executionState?: PromptExecutionState
 }
 
 const dateFormatter = new Intl.DateTimeFormat('ko-KR', {
@@ -26,11 +33,14 @@ export function PromptCard({
   onEdit,
   onDelete,
   onRun,
+  onCancel,
   onDragStart,
   onDragEnd,
+  executionState,
 }: PromptCardProps) {
   const canManage = prompt.status === 'draft' || prompt.status === 'failed'
   const canRun = prompt.status === 'draft' || prompt.status === 'failed'
+  const stageLabel = getStageLabel(executionState?.stage)
   const timeLabel =
     prompt.status === 'draft'
       ? '수정됨'
@@ -92,10 +102,23 @@ export function PromptCard({
       {prompt.status === 'running' && (
         <div className="execution-state">
           <span className="execution-spinner" />
-          <div>
-            <strong>API 응답 대기</strong>
-            <small>Copilot이 프롬프트를 처리하고 있습니다.</small>
+          <div className="execution-copy">
+            <strong>{stageLabel}</strong>
+            <small>
+              {executionState?.stageMessage ||
+                'Copilot이 프롬프트를 처리하고 있습니다.'}
+            </small>
           </div>
+        </div>
+      )}
+
+      {prompt.status === 'running' && executionState?.streamedText && (
+        <pre className="execution-log">{executionState.streamedText}</pre>
+      )}
+
+      {prompt.status === 'running' && executionState?.cancelError && (
+        <div className="card-error" role="alert">
+          {executionState.cancelError}
         </div>
       )}
 
@@ -119,13 +142,36 @@ export function PromptCard({
             <Icon name="send" size={13} />
             {prompt.status === 'failed' ? '재실행' : '실행'}
           </button>
+        ) : prompt.status === 'running' ? (
+          <div className="running-actions">
+            <button
+              className="cancel-action"
+              type="button"
+              onClick={onCancel}
+              disabled={executionState?.isCancelling}
+            >
+              <Icon name="close" size={12} />
+              {executionState?.isCancelling ? '취소 요청 중...' : '취소'}
+            </button>
+            <span className={`card-status running stage-${stageLabel}`}>
+              <i />
+              {stageLabel}
+            </span>
+          </div>
         ) : (
           <span className={`card-status ${prompt.status}`}>
             <i />
-            {prompt.status === 'running' ? '진행중' : '완료'}
+            완료
           </span>
         )}
       </footer>
     </article>
   )
+}
+
+function getStageLabel(stage: OrchestrationStage | null | undefined) {
+  if (stage === 'planner') return 'planning'
+  if (stage === 'executor') return 'executing'
+  if (stage === 'reviewer') return 'reviewing'
+  return 'processing'
 }

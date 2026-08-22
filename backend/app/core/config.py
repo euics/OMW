@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     github_copilot_timeout: float = 60.0
     github_copilot_log_level: str = "info"
     github_copilot_cli_path: str | None = None
+    github_copilot_retry_attempts: int = 3
+    github_copilot_retry_backoff_seconds: float = 0.5
+    github_copilot_retry_backoff_multiplier: float = 2.0
+    github_copilot_retry_max_backoff_seconds: float = 5.0
+    github_copilot_fallback_model: str | None = None
+    github_copilot_orchestration_enabled: bool = True
     execute_rate_limit: int = Field(default=10, ge=1)
     execute_rate_window_seconds: int = Field(default=60, ge=1)
     github_copilot_instructions: str = (

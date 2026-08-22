@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import time
 
 from fastapi.testclient import TestClient
 
@@ -12,12 +13,22 @@ from app.services.prompts import PromptService, get_prompt_service
 
 
 class StubPromptAgent:
-    async def reply(self, message: str) -> AgentResult:
+    async def reply(
+        self,
+        message: str,
+        *,
+        output_format=None,
+    ) -> AgentResult:
         return AgentResult(reply="요청된 프롬프트의 실행 결과입니다.")
 
 
 class FailingPromptAgent:
-    async def reply(self, message: str) -> AgentResult:
+    async def reply(
+        self,
+        message: str,
+        *,
+        output_format=None,
+    ) -> AgentResult:
         raise AgentServiceError("AI 요청에 실패했습니다.")
 
 
@@ -37,6 +48,24 @@ def create_test_client(
     )
     app.dependency_overrides[get_prompt_service] = lambda: service
     return TestClient(app), service, repository
+
+
+def wait_for_prompt_status(
+    client: TestClient,
+    *,
+    prompt_id: str,
+    status: str,
+    attempts: int = 20,
+) -> dict[str, object]:
+    for _ in range(attempts):
+        response = client.get(f"/api/prompts?status={status}")
+        assert response.status_code == 200
+        items = response.json()["items"]
+        for item in items:
+            if item["id"] == prompt_id:
+                return item
+        time.sleep(0.05)
+    raise AssertionError(f"Prompt {prompt_id} never reached status {status}")
 
 
 def test_prompt_crud_without_user_data(database: Database) -> None:
@@ -107,7 +136,11 @@ def test_execute_prompt_persists_completed_response(database: Database) -> None:
     assert execute_response.status_code == 202
     assert execute_response.json()["status"] == "running"
 
-    stored = client.get("/api/prompts?status=completed").json()["items"][0]
+    stored = wait_for_prompt_status(
+        client,
+        prompt_id=created["id"],
+        status="completed",
+    )
     assert stored["status"] == "completed"
     assert stored["output"] == "요청된 프롬프트의 실행 결과입니다."
 
@@ -139,7 +172,11 @@ def test_failed_execution_moves_prompt_to_failed(database: Database) -> None:
     response = client.post(f"/api/prompts/{created['id']}/execute")
 
     assert response.status_code == 202
-    stored = client.get("/api/prompts?status=failed").json()["items"][0]
+    stored = wait_for_prompt_status(
+        client,
+        prompt_id=created["id"],
+        status="failed",
+    )
     assert stored["status"] == "failed"
     assert stored["errorMessage"] == "AI 요청에 실패했습니다."
 
