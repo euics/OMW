@@ -70,7 +70,7 @@ jobs:
           SSH_TARGET="${AZURE_SSH_USER}@${AZURE_HOST}"
           echo "$DOCKER_TOKEN" | ssh "$SSH_TARGET" "docker login -u '$DOCKER_USERNAME' --password-stdin"
           ssh "$SSH_TARGET" '
-            cd ~/onmyway &&
+            cd ~ &&
             docker compose pull backend frontend &&
             docker compose up -d backend frontend --wait &&
             curl --fail --silent --show-error http://127.0.0.1/api/health &&

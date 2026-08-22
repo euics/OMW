@@ -46,7 +46,7 @@ npm run dev
 - `DOCKER_USERNAME`: Docker Hub 사용자명
 - `DOCKER_TOKEN`: Docker Hub 액세스 토큰
 
-Azure VM의 `~/onmyway`에는 `backend`, `frontend` 서비스와 기존 MySQL 연결 설정이
+Azure VM의 홈 디렉터리에는 `backend`, `frontend` 서비스와 기존 MySQL 연결 설정이
 포함된 Compose 파일이 있어야 합니다. CI는 이 파일을 수정하지 않고 두 앱 이미지만
 pull한 뒤 재기동합니다.
 
