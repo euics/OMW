@@ -99,7 +99,7 @@ jobs:
             -p 80:80 \
             "$DOCKER_USERNAME/onmyway-frontend:$IMAGE_TAG"
 
-          curl --retry 15 --retry-delay 2 --retry-connrefused \
+          curl --retry 15 --retry-delay 2 --retry-all-errors \
             --fail --silent --show-error http://127.0.0.1/api/health
           docker image prune -f
           DEPLOY
