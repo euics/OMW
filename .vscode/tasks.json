@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Matdathon: 개발 서버 실행",
+      "type": "shell",
+      "command": "npm run dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Matdathon: 전체 검사",
+      "type": "shell",
+      "command": "npm run check",
+      "problemMatcher": [],
+      "group": "test"
+    }
+  ]
+}
