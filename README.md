@@ -82,4 +82,7 @@ AI 모델은 FE 요청과 분리되어 백엔드의 `GITHUB_COPILOT_MODEL=auto` 
 
 ```bash
 npm run check
+npm --prefix frontend run test:e2e
 ```
+
+E2E 테스트는 Playwright가 API 응답을 가로채 UI 계약만 검증하며 실제 Copilot을 호출하지 않습니다.

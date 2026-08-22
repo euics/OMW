@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 
 import {
@@ -87,6 +87,47 @@ function App() {
   const [draggedPromptId, setDraggedPromptId] = useState<string | null>(null)
   const [isRunningDropActive, setRunningDropActive] = useState(false)
   const [announcement, setAnnouncement] = useState('')
+  const runDialogRef = useRef<HTMLElement>(null)
+  const runTriggerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!pendingRun) return
+
+    runTriggerRef.current = document.activeElement as HTMLElement | null
+    const dialog = runDialogRef.current
+    const focusable = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      )
+    focusable()[0]?.focus()
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPendingRun(null)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      if (!items.length) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      runTriggerRef.current?.focus()
+    }
+  }, [pendingRun])
 
   const counts = useMemo(
     () => ({
@@ -429,6 +470,7 @@ function App() {
           }}
         >
           <section
+            ref={runDialogRef}
             className="run-dialog"
             role="dialog"
             aria-modal="true"

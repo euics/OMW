@@ -3,6 +3,8 @@
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 backend/.venv/
 __pycache__/
 *.py[cod]
