@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.database import get_database
 from app.repositories.prompts import get_prompt_repository
 from app.services.agent import close_agent_service
+from app.services.prompts import close_prompt_service
 
 settings = get_settings()
 
@@ -20,6 +21,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        await close_prompt_service()
         await close_agent_service()
 
 

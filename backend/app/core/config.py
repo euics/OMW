@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     github_copilot_timeout: float = 60.0
     github_copilot_log_level: str = "info"
     github_copilot_cli_path: str | None = None
+    github_copilot_retry_attempts: int = 3
+    github_copilot_retry_backoff_seconds: float = 0.5
+    github_copilot_retry_backoff_multiplier: float = 2.0
+    github_copilot_retry_max_backoff_seconds: float = 5.0
+    github_copilot_fallback_model: str | None = None
     github_copilot_instructions: str = (
         "You are an assistant for a prompt operations board. "
         "Answer in Korean unless the user requests another language. "

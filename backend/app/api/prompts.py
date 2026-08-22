@@ -1,6 +1,5 @@
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Query,
@@ -91,15 +90,27 @@ def delete_prompt(
     response_model=PromptRead,
     status_code=status.HTTP_202_ACCEPTED,
 )
-def execute_prompt(
+async def execute_prompt(
     prompt_id: str,
-    background_tasks: BackgroundTasks,
     service: PromptService = Depends(get_prompt_service),
 ) -> PromptRead:
     try:
-        prompt = service.start_execution(prompt_id)
+        prompt = await service.start_execution(prompt_id)
     except (PromptNotFoundError, PromptStateConflictError) as error:
         raise_prompt_http_error(error)
-
-    background_tasks.add_task(service.run_execution, prompt_id)
     return prompt
+
+
+@router.post(
+    "/{prompt_id}/cancel",
+    response_model=PromptRead,
+    status_code=status.HTTP_200_OK,
+)
+async def cancel_prompt(
+    prompt_id: str,
+    service: PromptService = Depends(get_prompt_service),
+) -> PromptRead:
+    try:
+        return await service.cancel_execution(prompt_id)
+    except (PromptNotFoundError, PromptStateConflictError) as error:
+        raise_prompt_http_error(error)

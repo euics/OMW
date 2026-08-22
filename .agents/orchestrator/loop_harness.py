@@ -418,7 +418,7 @@ def run_agent(
                 }
             )
             process = subprocess.run(
-                sandboxed_agent_command(command, workspace, output_path),
+                sandboxed_agent_command(command, repo, workspace, output_path),
                 cwd=workspace,
                 input=prompt,
                 text=True,
@@ -713,6 +713,7 @@ def sandboxed_qa_command(command: list[str], workspace: Path) -> list[str]:
 
 def sandboxed_agent_command(
     command: list[str],
+    repo: Path,
     workspace: Path,
     output_path: Path,
 ) -> list[str]:
@@ -722,8 +723,10 @@ def sandboxed_agent_command(
             "this project currently configures macOS sandbox-exec."
         )
     workspace = workspace.resolve()
+    repo = repo.resolve()
     output_path = output_path.resolve()
     real_home_rule = json.dumps(str(Path.home().resolve()))
+    repo_rule = json.dumps(str(repo))
     write_rules = " ".join(
         f"(subpath {json.dumps(path)})"
         for path in (
@@ -742,6 +745,7 @@ def sandboxed_agent_command(
         "(allow network*)"
         "(allow file-read*)"
         f"(deny file-read* (subpath {real_home_rule}))"
+        f"(allow file-read* (subpath {repo_rule}))"
         f"(allow file-write* {write_rules})"
     )
     return ["/usr/bin/sandbox-exec", "-p", profile, "--", *command]

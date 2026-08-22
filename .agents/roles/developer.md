@@ -8,6 +8,8 @@
 - Address every actionable item from the previous QA feedback.
 - Never commit, push, change credentials, or weaken tests and security checks.
 - Do not perform the final QA or approve your own work.
+- If safe file editing cannot be provided within the allowed scopes, return
+  `"status": "BLOCKED"` with a clear explanation instead of expanding access.
 
 ## Output
 
