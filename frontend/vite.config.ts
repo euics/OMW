@@ -34,6 +34,7 @@ export default defineConfig({
   preview: {
     host: '0.0.0.0',
     port: 80,
+    allowedHosts: ['onmyway-matdathon.koreacentral.cloudapp.azure.com'],
     headers: securityHeaders,
     proxy: {
       '/api': {
