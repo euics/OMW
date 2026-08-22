@@ -1,6 +1,6 @@
 # TRD — OnMyWay Agent Operations Harness
 
-> **문서 상태:** 현재 구현 기준
+> **문서 상태:** 2026-08-22 최신 `main` 구현 기준
 > **관련 문서:** [PRD](./PRD.md)
 > **기술 스택:** React 19, TypeScript, Vite, FastAPI, MySQL, Microsoft Agent Framework, GitHub Copilot SDK
 
@@ -48,6 +48,9 @@ FastAPI
 - 상태별 작업과 개수 표시
 - 진행중 작업 자동 갱신
 - 완료 결과, 실패 원인과 재시도 동작 제공
+- 데스크톱 4열, 태블릿 2열, 모바일 1열의 반응형 보드 제공
+- 터치 환경에서 카드 관리 동작을 항상 노출하고 작은 화면에서 작성 서랍과 실행
+  대화상자를 뷰포트 안에 배치
 
 **백엔드 API**
 
@@ -151,6 +154,9 @@ prompts
 
 `(status, updated_at DESC)` 인덱스로 상태별 최신 작업 조회를 지원한다.
 
+데이터베이스 열은 `snake_case`를 사용하고 API JSON은 Pydantic alias generator를 통해
+`camelCase`로 직렬화한다.
+
 ## 6. API 계약
 
 | Method | Path | 동작 |
@@ -167,12 +173,22 @@ prompts
 
 - 제목: 공백 제거 후 1~80자
 - 프롬프트: 공백 제거 후 1~4,000자
-- 출력 형식: `markdown`, `plainText`, `json`
+- 출력 형식 `outputFormat`: `markdown`, `plainText`, `json`이며 생략 시 `markdown`
 - 알 수 없는 필드: 거부
 - 페이지 크기: 1~100
 
 클라이언트는 모델명을 전달할 수 없다. 모델은 서버의
 `GITHUB_COPILOT_MODEL` 설정으로만 선택한다.
+
+### JSON 응답 계약
+
+- 모든 복합 필드는 `outputFormat`, `errorMessage`, `createdAt`, `updatedAt`,
+  `startedAt`, `completedAt`, `pageSize`, `totalPages`, `hasNext`처럼
+  `camelCase`로 반환한다.
+- `output`, `errorMessage`, `startedAt`, `completedAt`은 응답 객체에 항상 존재하며
+  값이 없으면 `null`이다.
+- 유효성 검증 실패의 `detail` 배열과 도메인 오류의 문자열 `detail`을 프론트엔드가
+  모두 사용자 메시지로 변환한다.
 
 ## 7. 동시 실행과 일관성
 
@@ -214,24 +230,29 @@ prompts
 
 ```text
 GitHub Actions
-  ├─ frontend Docker image build/push
-  ├─ backend Docker image build/push
+  ├─ frontend/backend Docker image build
+  ├─ Docker Hub에 commit SHA 및 latest 태그 push
   └─ Azure VM SSH deployment
-       ├─ docker compose pull
-       ├─ docker compose up --wait
+       ├─ 전용 Docker network 생성 및 MySQL 연결
+       ├─ backend/frontend 컨테이너 교체
+       ├─ backend에 DB·Copilot 환경 변수 주입
        └─ /api/health verification
 ```
 
-필요한 GitHub `production` 환경 시크릿:
+필요한 GitHub Actions 저장소 시크릿:
 
 - `AZURE_HOST`
 - `AZURE_SSH_USER`
 - `AZURE_SSH_PRIVATE_KEY`
 - `DOCKER_USERNAME`
 - `DOCKER_TOKEN`
+- `DB_PASSWORD`
+- `COPILOT_TOKEN`
 
-배포 성공의 완료 조건은 두 컨테이너가 정상 상태가 되고 Azure VM 내부에서
-`/api/health`가 성공하는 것이다.
+워크플로는 `COPILOT_TOKEN`을 백엔드 컨테이너의 `GITHUB_COPILOT_TOKEN`으로
+전달한다. 프론트엔드는 Vite preview 서버의 `/api` 프록시를 통해 Docker network의
+`backend:8000`으로 요청한다. 배포 성공의 완료 조건은 새 컨테이너가 기동되고 Azure
+VM 내부의 `http://127.0.0.1/api/health` 요청이 성공하는 것이다.
 
 ## 11. 테스트 전략
 
@@ -264,11 +285,13 @@ GitHub Actions
 | 실행 전 확인 | `App.tsx` | 프론트엔드 테스트 추가 필요 |
 | Agent Framework 실행 | `services/agent.py` | 에이전트 서비스 테스트 |
 | 상태 추적 | `repositories/prompts.py`, `usePromptBoard.ts` | API 테스트 |
+| camelCase API 계약 | `schemas/prompt.py`, `api.ts`, `types.ts` | CRUD·페이지 API 테스트 |
 | 결과와 실패 보관 | `services/prompts.py` | 성공·실패 테스트 |
 | 중복 실행 방지 | `repositories/prompts.py` | 동시 실행 테스트 |
 | 중단 복구 | `main.py`, `repositories/prompts.py` | 복구 테스트 |
 | 페이지 조회 | `repositories/prompts.py`, `usePromptBoard.ts` | 페이지 테스트 |
-| Azure 배포 | `.github/workflows/deploy.yml` | 배포 성공 기록 필요 |
+| 반응형 UI | `styles.css`, `App.tsx` | 뷰포트·접근성 테스트 추가 필요 |
+| Azure 배포 | `.github/workflows/deploy.yml`, `frontend/vite.config.ts` | 배포 성공 기록 필요 |
 
 ## 13. 완료 정의
 
