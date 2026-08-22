@@ -8,6 +8,7 @@
     "dev:api": "backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --reload --host 0.0.0.0 --port 8000",
     "dev:web": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
+    "benchmark": "npm --silent --prefix frontend run benchmark",
     "test": "backend/.venv/bin/python -m pytest backend/tests",
     "check": "npm run build && npm run test"
   },

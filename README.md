@@ -93,6 +93,16 @@ AI 모델은 FE 요청과 분리되어 백엔드의 `GITHUB_COPILOT_MODEL=auto` 
 ```bash
 npm run check
 npm --prefix frontend run test:e2e
+npm run --silent benchmark
 ```
 
 E2E 테스트는 Playwright가 API 응답을 가로채 UI 계약만 검증하며 실제 Copilot을 호출하지 않습니다.
+
+### 자동화 워크플로 벤치마크
+
+`npm run benchmark`는 기존 Playwright API mock helper로 고정된 5개 작업
+(미실행 2, 진행중 1, 완료 1, 실패 1)을 로드합니다. 보드 준비, 상태 요약과 완료 결과
+발견, 실패 작업 재시도(클릭 수와 경과 시간), 외부 창 전환 수를 단일 JSON으로
+출력합니다. 시간은 로컬 브라우저의 자동화 단계별 wall-clock 측정값입니다. 이는
+재현 가능한 **자동화 워크플로 벤치마크**이며 사용자 연구, 사용자 생산성 주장,
+실제 Copilot 호출 또는 라이브 Copilot 지연 시간 측정이 아닙니다.
