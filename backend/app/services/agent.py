@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from enum import Enum
 from functools import lru_cache
 from typing import Protocol
 
@@ -18,6 +19,14 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class AgentResult:
     reply: str
+
+
+class AgentFailureCategory(str, Enum):
+    AUTHENTICATION = "authentication"
+    CONFIGURATION = "configuration"
+    TIMEOUT = "timeout"
+    TRANSIENT = "transient"
+    UNKNOWN = "unknown"
 
 
 class CopilotSession(Protocol):
@@ -47,6 +56,100 @@ class CopilotAgent(Protocol):
 class AgentServiceError(RuntimeError):
     """Raised when the configured agent provider cannot complete a request."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: AgentFailureCategory = AgentFailureCategory.UNKNOWN,
+    ) -> None:
+        super().__init__(message)
+        self.category = category
+
+    @property
+    def retryable(self) -> bool:
+        return self.category in {
+            AgentFailureCategory.TIMEOUT,
+            AgentFailureCategory.TRANSIENT,
+        }
+
+
+_FAILURE_MESSAGES = {
+    AgentFailureCategory.AUTHENTICATION: (
+        "GitHub Copilot 인증에 실패했습니다. 서버 인증 설정을 확인해 주세요."
+    ),
+    AgentFailureCategory.CONFIGURATION: (
+        "GitHub Copilot 설정이 올바르지 않습니다. 서버 설정을 확인해 주세요."
+    ),
+    AgentFailureCategory.TIMEOUT: (
+        "GitHub Copilot 요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+    ),
+    AgentFailureCategory.TRANSIENT: (
+        "GitHub Copilot 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요."
+    ),
+    AgentFailureCategory.UNKNOWN: "GitHub Copilot 요청을 완료하지 못했습니다.",
+}
+
+
+def classify_provider_failure(error: BaseException) -> AgentFailureCategory:
+    if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+        return AgentFailureCategory.TIMEOUT
+
+    details = f"{type(error).__name__} {error}".lower()
+    if any(
+        marker in details
+        for marker in (
+            "unauthorized",
+            "forbidden",
+            "authentication",
+            "credential",
+            "not logged in",
+            "invalid token",
+            "401",
+            "403",
+        )
+    ):
+        return AgentFailureCategory.AUTHENTICATION
+    if any(
+        marker in details
+        for marker in (
+            "configuration",
+            "invalid config",
+            "invalid model",
+            "model not found",
+            "cli not found",
+            "executable not found",
+            "enoent",
+        )
+    ):
+        return AgentFailureCategory.CONFIGURATION
+    if any(marker in details for marker in ("timeout", "timed out", "deadline")):
+        return AgentFailureCategory.TIMEOUT
+    if any(
+        marker in details
+        for marker in (
+            "rate limit",
+            "too many requests",
+            "temporar",
+            "unavailable",
+            "overloaded",
+            "connection",
+            "network",
+            "reset",
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+        )
+    ):
+        return AgentFailureCategory.TRANSIENT
+    return AgentFailureCategory.UNKNOWN
+
+
+def _safe_provider_error(error: BaseException) -> AgentServiceError:
+    category = classify_provider_failure(error)
+    return AgentServiceError(_FAILURE_MESSAGES[category], category=category)
+
 
 class CopilotAgentService:
     """Microsoft Agent Framework service backed by the GitHub Copilot SDK."""
@@ -61,7 +164,14 @@ class CopilotAgentService:
         cli_path: str | None = None,
         token: str | None = None,
         agent: CopilotAgent | None = None,
+        max_provider_attempts: int = 2,
+        retry_delay: float = 0.05,
     ) -> None:
+        if not 1 <= max_provider_attempts <= 3:
+            raise ValueError("max_provider_attempts must be between 1 and 3")
+        if retry_delay < 0:
+            raise ValueError("retry_delay must not be negative")
+
         options = GitHubCopilotOptions(
             model=model,
             timeout=timeout,
@@ -80,6 +190,8 @@ class CopilotAgentService:
         )
         self._started = False
         self._start_lock = asyncio.Lock()
+        self._max_provider_attempts = max_provider_attempts
+        self._retry_delay = retry_delay
 
     async def _ensure_started(self) -> None:
         if self._started:
@@ -89,13 +201,20 @@ class CopilotAgentService:
             if self._started:
                 return
 
-            try:
-                await self._agent.start()
-            except AgentException as exc:
-                logger.exception("Failed to start the GitHub Copilot agent")
-                raise AgentServiceError(
-                    "GitHub Copilot을 시작하지 못했습니다. CLI 인증과 설정을 확인해 주세요."
-                ) from exc
+            for attempt in range(1, self._max_provider_attempts + 1):
+                try:
+                    await self._agent.start()
+                    break
+                except (AgentException, asyncio.TimeoutError) as exc:
+                    error = _safe_provider_error(exc)
+                    logger.warning(
+                        "GitHub Copilot agent start failed (category=%s, attempt=%d)",
+                        error.category.value,
+                        attempt,
+                    )
+                    if not error.retryable or attempt == self._max_provider_attempts:
+                        raise error from exc
+                    await asyncio.sleep(self._retry_delay)
 
             self._started = True
 
@@ -108,18 +227,24 @@ class CopilotAgentService:
             raise ValueError("message must not be blank")
 
         await self._ensure_started()
-        session = self._agent.create_session()
-
-        try:
-            response = await self._agent.run(
-                normalized,
-                session=session,
-            )
-        except AgentException as exc:
-            logger.exception("GitHub Copilot request failed")
-            raise AgentServiceError(
-                "GitHub Copilot 요청에 실패했습니다. 인증 상태와 모델 설정을 확인해 주세요."
-            ) from exc
+        for attempt in range(1, self._max_provider_attempts + 1):
+            try:
+                session = self._agent.create_session()
+                response = await self._agent.run(
+                    normalized,
+                    session=session,
+                )
+                break
+            except (AgentException, asyncio.TimeoutError) as exc:
+                error = _safe_provider_error(exc)
+                logger.warning(
+                    "GitHub Copilot request failed (category=%s, attempt=%d)",
+                    error.category.value,
+                    attempt,
+                )
+                if not error.retryable or attempt == self._max_provider_attempts:
+                    raise error from exc
+                await asyncio.sleep(self._retry_delay)
 
         reply = response.text.strip()
         if not reply:

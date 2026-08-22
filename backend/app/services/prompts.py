@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 from functools import lru_cache
 from typing import Protocol
+
+from pydantic import ConfigDict, JsonValue, RootModel, ValidationError
 
 from app.repositories.prompts import PromptRepository, get_prompt_repository
 from app.schemas.prompt import (
@@ -32,6 +35,51 @@ OUTPUT_INSTRUCTIONS = {
     OutputFormat.PLAIN_TEXT.value: "응답은 서식 없는 일반 텍스트로 작성하세요.",
     OutputFormat.JSON.value: "응답은 유효한 JSON만 반환하세요.",
 }
+
+MAX_STORED_OUTPUT_BYTES = 100_000
+
+
+class StructuredOutput(RootModel[JsonValue]):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+class OutputValidationError(ValueError):
+    pass
+
+
+class MalformedStructuredOutputError(OutputValidationError):
+    pass
+
+
+def validate_output(output: str, output_format: OutputFormat | str) -> str:
+    normalized = output.strip()
+    if not normalized:
+        raise OutputValidationError("AI가 비어 있는 응답을 반환했습니다.")
+    if len(normalized.encode("utf-8")) > MAX_STORED_OUTPUT_BYTES:
+        raise OutputValidationError(
+            "AI 응답이 저장 가능한 최대 크기를 초과했습니다."
+        )
+    if output_format not in (OutputFormat.JSON, OutputFormat.JSON.value):
+        return normalized
+
+    try:
+        value = StructuredOutput.model_validate_json(normalized).root
+        canonical = json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise MalformedStructuredOutputError(
+            "AI가 유효한 JSON 응답을 반환하지 않았습니다."
+        ) from exc
+    if len(canonical.encode("utf-8")) > MAX_STORED_OUTPUT_BYTES:
+        raise OutputValidationError(
+            "AI 응답이 저장 가능한 최대 크기를 초과했습니다."
+        )
+    return canonical
 
 
 class PromptService:
@@ -80,12 +128,32 @@ class PromptService:
         )
         try:
             result = await self._agent_service.reply(request)
+            try:
+                output = validate_output(result.reply, prompt.output_format)
+            except MalformedStructuredOutputError:
+                correction_request = (
+                    f"{request}\n\n"
+                    "이전 응답은 유효한 JSON이 아니었습니다. "
+                    "아래 응답을 수정하여 설명이나 Markdown 코드 펜스 없이 "
+                    "유효한 JSON만 다시 반환하세요.\n\n"
+                    f"<invalid-response>\n{result.reply}\n</invalid-response>"
+                )
+                corrected = await self._agent_service.reply(correction_request)
+                output = validate_output(corrected.reply, prompt.output_format)
             self._repository.mark_completed(
                 prompt.id,
-                output=result.reply,
+                output=output,
             )
+        except OutputValidationError as exc:
+            logger.warning("Prompt output validation failed for %s", prompt.id)
+            self._repository.mark_failed(prompt.id, str(exc))
+            return
         except AgentServiceError as exc:
-            logger.warning("Prompt execution failed for %s: %s", prompt.id, exc)
+            logger.warning(
+                "Prompt execution failed for %s (category=%s)",
+                prompt.id,
+                exc.category.value,
+            )
             self._repository.mark_failed(prompt.id, str(exc))
             return
         except Exception:
