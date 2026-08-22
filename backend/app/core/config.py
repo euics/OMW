@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     github_copilot_model: str = "auto"
     github_copilot_token: SecretStr | None = None
     github_copilot_timeout: float = 60.0
+    github_copilot_max_concurrent_executions: int = Field(default=4, ge=1)
     github_copilot_log_level: str = "info"
     github_copilot_cli_path: str | None = None
     github_copilot_instructions: str = (

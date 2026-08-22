@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
 from typing import Protocol
 
+from fastapi import Depends
 from pydantic import ConfigDict, JsonValue, RootModel, ValidationError
 
 from app.repositories.prompts import PromptRepository, get_prompt_repository
@@ -20,6 +20,7 @@ from app.schemas.prompt import (
 from app.services.agent import (
     AgentResult,
     AgentServiceError,
+    CopilotAgentService,
     get_agent_service,
 )
 
@@ -165,9 +166,10 @@ class PromptService:
             return
 
 
-@lru_cache
-def get_prompt_service() -> PromptService:
+def get_prompt_service(
+    agent_service: CopilotAgentService = Depends(get_agent_service),
+) -> PromptService:
     return PromptService(
         repository=get_prompt_repository(),
-        agent_service=get_agent_service(),
+        agent_service=agent_service,
     )

@@ -1,26 +1,51 @@
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from app.api.prompts import router as prompts_router
 from app.api.routes import router
 from app.core.config import get_settings
 from app.database import get_database
 from app.repositories.prompts import get_prompt_repository
-from app.services.agent import close_agent_service
+from app.services.agent import AgentServiceProvider
 
 settings = get_settings()
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), geolocation=(), microphone=()",
+}
+
+
+async def add_security_headers(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    response = await call_next(request)
+    for name, value in SECURITY_HEADERS.items():
+        response.headers[name] = value
+    return response
+
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    get_database().initialize()
-    get_prompt_repository().recover_interrupted()
+async def lifespan(app: FastAPI):
+    agent_service_provider = AgentServiceProvider()
+    app.state.agent_service_provider = agent_service_provider
     try:
+        agent_service_provider.get()
+        get_database().initialize()
+        get_prompt_repository().recover_interrupted()
         yield
     finally:
-        await close_agent_service()
+        await agent_service_provider.close()
+        del app.state.agent_service_provider
 
 
 app = FastAPI(
@@ -37,6 +62,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(BaseHTTPMiddleware, dispatch=add_security_headers)
 
 app.include_router(router)
 app.include_router(prompts_router)

@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass
 from enum import Enum
-from functools import lru_cache
-from typing import Protocol
+from typing import Callable, Protocol
 
 from agent_framework.exceptions import AgentException
 from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
 from copilot import CopilotClient
+from fastapi import Request
 
 from app.core.config import get_settings
 
@@ -164,9 +165,12 @@ class CopilotAgentService:
         cli_path: str | None = None,
         token: str | None = None,
         agent: CopilotAgent | None = None,
+        max_concurrent_executions: int = 4,
         max_provider_attempts: int = 2,
         retry_delay: float = 0.05,
     ) -> None:
+        if max_concurrent_executions < 1:
+            raise ValueError("max_concurrent_executions must be at least 1")
         if not 1 <= max_provider_attempts <= 3:
             raise ValueError("max_provider_attempts must be between 1 and 3")
         if retry_delay < 0:
@@ -190,6 +194,7 @@ class CopilotAgentService:
         )
         self._started = False
         self._start_lock = asyncio.Lock()
+        self._execution_slots = asyncio.Semaphore(max_concurrent_executions)
         self._max_provider_attempts = max_provider_attempts
         self._retry_delay = retry_delay
 
@@ -226,25 +231,26 @@ class CopilotAgentService:
         if not normalized:
             raise ValueError("message must not be blank")
 
-        await self._ensure_started()
-        for attempt in range(1, self._max_provider_attempts + 1):
-            try:
-                session = self._agent.create_session()
-                response = await self._agent.run(
-                    normalized,
-                    session=session,
-                )
-                break
-            except (AgentException, asyncio.TimeoutError) as exc:
-                error = _safe_provider_error(exc)
-                logger.warning(
-                    "GitHub Copilot request failed (category=%s, attempt=%d)",
-                    error.category.value,
-                    attempt,
-                )
-                if not error.retryable or attempt == self._max_provider_attempts:
-                    raise error from exc
-                await asyncio.sleep(self._retry_delay)
+        async with self._execution_slots:
+            await self._ensure_started()
+            for attempt in range(1, self._max_provider_attempts + 1):
+                try:
+                    session = self._agent.create_session()
+                    response = await self._agent.run(
+                        normalized,
+                        session=session,
+                    )
+                    break
+                except (AgentException, asyncio.TimeoutError) as exc:
+                    error = _safe_provider_error(exc)
+                    logger.warning(
+                        "GitHub Copilot request failed (category=%s, attempt=%d)",
+                        error.category.value,
+                        attempt,
+                    )
+                    if not error.retryable or attempt == self._max_provider_attempts:
+                        raise error from exc
+                    await asyncio.sleep(self._retry_delay)
 
         reply = response.text.strip()
         if not reply:
@@ -262,8 +268,7 @@ class CopilotAgentService:
         self._started = False
 
 
-@lru_cache
-def get_agent_service() -> CopilotAgentService:
+def create_agent_service() -> CopilotAgentService:
     settings = get_settings()
     return CopilotAgentService(
         model=settings.github_copilot_model,
@@ -276,12 +281,43 @@ def get_agent_service() -> CopilotAgentService:
             else None
         ),
         instructions=settings.github_copilot_instructions,
+        max_concurrent_executions=(
+            settings.github_copilot_max_concurrent_executions
+        ),
     )
 
 
-async def close_agent_service() -> None:
-    if get_agent_service.cache_info().currsize == 0:
-        return
+class AgentServiceProvider:
+    """Owns one service and rejects access once shutdown has begun."""
 
-    await get_agent_service().close()
-    get_agent_service.cache_clear()
+    def __init__(
+        self,
+        factory: Callable[[], CopilotAgentService] = create_agent_service,
+    ) -> None:
+        self._factory = factory
+        self._service: CopilotAgentService | None = None
+        self._closed = False
+        self._lock = threading.Lock()
+
+    def get(self) -> CopilotAgentService:
+        """Return the live service, or raise after close has claimed the lifecycle."""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Agent service provider is closed")
+            if self._service is None:
+                self._service = self._factory()
+            return self._service
+
+    async def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            service = self._service
+            self._service = None
+
+        if service is not None:
+            await service.close()
+
+
+def get_agent_service(request: Request) -> CopilotAgentService:
+    provider: AgentServiceProvider = request.app.state.agent_service_provider
+    return provider.get()

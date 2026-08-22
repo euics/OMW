@@ -6,7 +6,8 @@ echo "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d  actions-
 
 tar xzf ./actions-runner-linux-x64-2.336.0.tar.gz
 
-./config.sh --url https://github.com/CodingHarang/OnMyWay --token AWVV2N66CAQDCRI6FE6SO3LKREXAM
+# GitHub에서 새 단기 runner 등록 토큰을 발급받아 환경 변수로 전달하세요.
+./config.sh --url https://github.com/CodingHarang/OnMyWay --token "$RUNNER_REGISTRATION_TOKEN"
 
 ./run.sh
 

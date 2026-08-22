@@ -52,6 +52,13 @@ Azure VM의 홈 디렉터리에는 `backend`, `frontend` 서비스와 기존 MyS
 포함된 Compose 파일이 있어야 합니다. CI는 이 파일을 수정하지 않고 두 앱 이미지만
 pull한 뒤 재기동합니다.
 
+프로덕션에서는 Azure ingress에서 TLS를 반드시 종료하고 HTTPS만 외부에 노출해야
+합니다. 애플리케이션의 보안 응답 헤더는 TLS를 대신하지 않습니다.
+
+과거 `SHARED_FILES.md`에 커밋된 self-hosted runner 등록 토큰은 이 변경에서 Git
+히스토리를 다시 쓰지 않으므로 GitHub에서 반드시 폐기(revoke)하고 새 토큰을
+발급해야 합니다. 문서에는 이제 환경 변수 자리표시자만 포함됩니다.
+
 ## 프롬프트 API
 
 | Method | Path | 설명 |
@@ -75,6 +82,9 @@ curl http://localhost:8000/api/prompts \
 
 AI 모델은 FE 요청과 분리되어 백엔드의 `GITHUB_COPILOT_MODEL=auto` 설정으로
 자동 선택됩니다. 타임아웃은 `GITHUB_COPILOT_TIMEOUT`으로 변경할 수 있습니다.
+동시에 공급자로 전달되는 요청 수는
+`GITHUB_COPILOT_MAX_CONCURRENT_EXECUTIONS`(기본값 `4`, 최소 `1`)로 제한되며,
+한도를 초과한 실행은 실패하지 않고 실행 슬롯이 빌 때까지 대기합니다.
 로그인·사용자 테이블·소유자 필드는 없으며, 파일·셸·URL 도구 권한은 API
 서버에서 기본적으로 거부됩니다.
 
