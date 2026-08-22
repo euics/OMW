@@ -62,6 +62,8 @@ export const promptApi = {
   board: (pageSize: number) =>
     request<PromptBoard>(`/api/prompts/board?pageSize=${pageSize}`),
 
+  events: (id: string) => `/api/prompts/${id}/events`,
+
   list: (status: PromptStatus, page: number, pageSize: number) =>
     request<PromptPage>(
       `/api/prompts?status=${status}&page=${page}&pageSize=${pageSize}`,
@@ -86,6 +88,11 @@ export const promptApi = {
 
   execute: (id: string) =>
     request<PromptItem>(`/api/prompts/${id}/execute`, {
+      method: 'POST',
+    }),
+
+  cancel: (id: string) =>
+    request<void>(`/api/prompts/${id}/cancel`, {
       method: 'POST',
     }),
 }

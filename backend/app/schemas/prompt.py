@@ -77,3 +77,31 @@ class PromptPage(ApiModel):
 
 class PromptBoard(ApiModel):
     columns: dict[PromptStatus, PromptPage]
+
+
+class PromptEventType(str, Enum):
+    STAGE = "stage"
+    CHUNK = "chunk"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class PromptEventStage(str, Enum):
+    PLANNER = "planner"
+    EXECUTOR = "executor"
+    REVIEWER = "reviewer"
+
+
+class PromptStreamEvent(ApiModel):
+    type: PromptEventType
+    stage: PromptEventStage | None = None
+    message: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("message")
+    @classmethod
+    def strip_message(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("must not be blank")
+        return normalized

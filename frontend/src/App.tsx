@@ -73,6 +73,7 @@ function App() {
     isLoading,
     errorMessage,
     loadingMoreStatus,
+    executionStates,
     clearError,
     refreshPrompts,
     loadMore,
@@ -80,6 +81,7 @@ function App() {
     updatePrompt,
     deletePrompt,
     startPrompt,
+    cancelPrompt,
   } = usePromptBoard()
   const [isComposerOpen, setComposerOpen] = useState(false)
   const [editingPrompt, setEditingPrompt] = useState<PromptItem | null>(null)
@@ -140,10 +142,11 @@ function App() {
 
     const prompt = pendingRun
     setPendingRun(null)
-    setAnnouncement(
-      `${prompt.title} 프롬프트의 실행을 요청했습니다.`,
-    )
-    void startPrompt(prompt.id).catch(() => undefined)
+    void startPrompt(prompt.id)
+      .then(() => {
+        setAnnouncement(`${prompt.title} 프롬프트의 실행을 요청했습니다.`)
+      })
+      .catch(() => undefined)
   }
 
   return (
@@ -314,8 +317,18 @@ function App() {
                         key={prompt.id}
                         prompt={prompt}
                         isDragging={draggedPromptId === prompt.id}
+                        executionState={executionStates[prompt.id]}
                         onEdit={() => openPromptEditor(prompt)}
                         onRun={() => setPendingRun(prompt)}
+                        onCancel={() => {
+                          void cancelPrompt(prompt.id)
+                            .then(() => {
+                              setAnnouncement(
+                                `${prompt.title} 프롬프트의 취소를 요청했습니다.`,
+                              )
+                            })
+                            .catch(() => undefined)
+                        }}
                         onDelete={() => {
                           void deletePrompt(prompt.id)
                             .then(() => {

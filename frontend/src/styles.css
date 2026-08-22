@@ -639,13 +639,17 @@ main {
 
 .execution-state {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 9px;
   margin-top: 12px;
   padding: 10px;
   border: 1px solid #d6e4ff;
   border-radius: 8px;
   background: #f2f6ff;
+}
+
+.execution-copy {
+  min-width: 0;
 }
 
 .execution-spinner {
@@ -672,6 +676,53 @@ main {
   margin-top: 2px;
   color: #7085ac;
   font-size: 8px;
+  overflow-wrap: anywhere;
+}
+
+.execution-log {
+  margin: 10px 0 0;
+  padding: 10px;
+  border: 1px solid #dbe1ee;
+  border-radius: 8px;
+  background: #fbfcff;
+  color: #37445f;
+  font-size: 9px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.running-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.cancel-action {
+  display: inline-flex;
+  height: 27px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid #f0b9b9;
+  border-radius: 6px;
+  color: #9d3e3e;
+  background: #fff5f5;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.cancel-action:hover:not(:disabled) {
+  border-color: #e58f8f;
+  background: #ffeaea;
+}
+
+.cancel-action:disabled {
+  cursor: wait;
+  opacity: 0.68;
 }
 
 .result-preview {
@@ -752,6 +803,10 @@ main {
   width: 5px;
   height: 5px;
   border-radius: 50%;
+  background: var(--blue);
+}
+
+.card-status.running i {
   background: var(--blue);
 }
 

@@ -17,14 +17,25 @@ from app.schemas.prompt import (
     PromptPage,
     PromptRead,
     PromptStatus,
+    PromptStreamEvent,
     PromptUpdate,
 )
-from app.services.agent import (
-    AgentResult,
-    AgentServiceError,
-    get_agent_service,
-)
+from app.services.agent import AgentResult, AgentServiceError
 from app.services.execution import PromptExecutionCoordinator
+from app.services.orchestration import (
+    PromptOrchestrationError,
+    PromptOrchestrationService,
+    get_prompt_orchestration_service,
+)
+from app.services.prompt_events import (
+    cancelled_event,
+    close_prompt_event_bus,
+    completed_event,
+    failed_event,
+    get_prompt_event_bus,
+    is_terminal_event_type,
+    snapshot_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,23 +49,22 @@ class AgentResponder(Protocol):
     ) -> AgentResult: ...
 
 
-OUTPUT_INSTRUCTIONS = {
-    OutputFormat.MARKDOWN.value: "응답은 읽기 쉬운 Markdown으로 작성하세요.",
-    OutputFormat.PLAIN_TEXT.value: "응답은 서식 없는 일반 텍스트로 작성하세요.",
-    OutputFormat.JSON.value: "응답은 유효한 JSON만 반환하세요.",
-}
-
-
 class PromptService:
     def __init__(
         self,
         repository: PromptRepository,
-        agent_service: AgentResponder,
+        agent_service: AgentResponder | None = None,
         execution_coordinator: PromptExecutionCoordinator | None = None,
+        orchestration_service: PromptOrchestrationService | None = None,
     ) -> None:
         self._repository = repository
-        self._agent_service = agent_service
         self._execution_coordinator = execution_coordinator or PromptExecutionCoordinator()
+        if orchestration_service is not None:
+            self._orchestration_service = orchestration_service
+        elif agent_service is not None:
+            self._orchestration_service = PromptOrchestrationService.single_agent(agent_service)  # type: ignore[arg-type]
+        else:
+            self._orchestration_service = get_prompt_orchestration_service()
 
     def list_prompts(
         self,
@@ -66,6 +76,9 @@ class PromptService:
 
     def get_board(self, page_size: int) -> PromptBoard:
         return self._repository.get_board(page_size)
+
+    def get_prompt(self, prompt_id: str) -> PromptRead:
+        return self._repository.get(prompt_id)
 
     def create_prompt(self, payload: PromptCreate) -> PromptRead:
         return self._repository.create(payload)
@@ -87,6 +100,12 @@ class PromptService:
                 prompt.id,
                 lambda: self.run_execution(prompt.id),
             )
+        except PromptStateConflictError:
+            self._repository.mark_failed(
+                prompt.id,
+                "프롬프트 실행을 시작하지 못했습니다.",
+            )
+            raise
         except RuntimeError:
             self._repository.mark_failed(
                 prompt.id,
@@ -111,29 +130,24 @@ class PromptService:
 
     async def run_execution(self, prompt_id: str) -> None:
         prompt = self._repository.get(prompt_id)
-        output_format = (
-            prompt.output_format.value
-            if hasattr(prompt.output_format, "value")
-            else prompt.output_format
-        )
-        instruction = OUTPUT_INSTRUCTIONS[output_format]
-        request = (
-            f"작업 이름: {prompt.title}\n\n"
-            f"출력 형식: {output_format}\n\n"
-            f"사용자 프롬프트:\n{prompt.prompt}\n\n"
-            f"응답 지침: {instruction}"
-        )
+        bus = get_prompt_event_bus()
+
+        async def emit(event: PromptStreamEvent) -> None:
+            await bus.publish(prompt.id, event)
+
         try:
-            result = await self._agent_service.reply(
-                request,
-                output_format=output_format,
+            output = await self._orchestration_service.execute(
+                prompt,
+                emit_event=emit,
             )
             self._repository.mark_completed(
                 prompt.id,
-                output=result.reply,
+                output=output,
             )
+            await emit(completed_event("프롬프트 실행이 완료되었습니다."))
         except asyncio.CancelledError:
             logger.info("Prompt execution cancelled for %s", prompt.id)
+            await emit(cancelled_event("프롬프트 실행이 취소되었습니다."))
             self._repository.mark_failed(
                 prompt.id,
                 "프롬프트 실행이 취소되었습니다.",
@@ -141,25 +155,58 @@ class PromptService:
             raise
         except AgentServiceError as exc:
             logger.warning("Prompt execution failed for %s: %s", prompt.id, exc)
+            await emit(failed_event(str(exc)))
+            self._repository.mark_failed(prompt.id, str(exc))
+            return
+        except PromptOrchestrationError as exc:
+            logger.warning("Prompt orchestration failed for %s: %s", prompt.id, exc)
+            await emit(failed_event(str(exc)))
             self._repository.mark_failed(prompt.id, str(exc))
             return
         except Exception:
             logger.exception("Unexpected prompt execution failure for %s", prompt.id)
+            await emit(failed_event("프롬프트 실행 중 예상하지 못한 오류가 발생했습니다."))
             self._repository.mark_failed(
                 prompt.id,
                 "프롬프트 실행 중 예상하지 못한 오류가 발생했습니다.",
             )
             return
 
+    async def stream_prompt_events(self, prompt_id: str):
+        bus = get_prompt_event_bus()
+        queue = await bus.subscribe(prompt_id)
+        try:
+            prompt = self._repository.get(prompt_id)
+            snapshot = snapshot_event(prompt)
+            yield snapshot
+            if is_terminal_event_type(snapshot.type):
+                return
+
+            while True:
+                event = await queue.get()
+                if event is None:
+                    return
+                yield event
+                if is_terminal_event_type(event.type):
+                    return
+        finally:
+            await bus.unsubscribe(prompt_id, queue)
+
     async def close(self) -> None:
         await self._execution_coordinator.close()
+        close_method = getattr(self._orchestration_service, "close", None)
+        if close_method is not None:
+            result = close_method()
+            if hasattr(result, "__await__"):
+                await result  # type: ignore[func-returns-value]
+        await close_prompt_event_bus()
 
 
 @lru_cache
 def get_prompt_service() -> PromptService:
     return PromptService(
         repository=get_prompt_repository(),
-        agent_service=get_agent_service(),
+        orchestration_service=get_prompt_orchestration_service(),
     )
 
 
@@ -169,3 +216,4 @@ async def close_prompt_service() -> None:
 
     await get_prompt_service().close()
     get_prompt_service.cache_clear()
+    get_prompt_orchestration_service.cache_clear()

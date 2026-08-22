@@ -135,8 +135,9 @@ def test_copilot_service_streams_and_collects_final_response() -> None:
             instructions="Be concise.",
             agent=fake_agent,
         )
+        chunks: list[str] = []
 
-        result = await service.reply("스트리밍 요청")
+        result = await service.reply("스트리밍 요청", on_update=chunks.append)
         await service.close()
 
         assert result.reply == "최종 응답"
@@ -144,6 +145,7 @@ def test_copilot_service_streams_and_collects_final_response() -> None:
         assert stream.finalized is True
         assert fake_agent.calls[0].stream is True
         assert fake_agent.calls[0].options == {"model": "auto"}
+        assert chunks == ["중간", "응답"]
 
     asyncio.run(exercise())
 

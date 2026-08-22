@@ -6,6 +6,8 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.responses import StreamingResponse
+import json
 
 from app.repositories.prompts import PromptNotFoundError, PromptStateConflictError
 from app.schemas.prompt import (
@@ -33,6 +35,11 @@ def raise_prompt_http_error(error: Exception) -> None:
             detail=str(error),
         ) from error
     raise error
+
+
+def _sse_event(event: object) -> str:
+    payload = event.model_dump(by_alias=True) if hasattr(event, "model_dump") else event
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @router.get("/board", response_model=PromptBoard)
@@ -114,3 +121,27 @@ async def cancel_prompt(
         return await service.cancel_execution(prompt_id)
     except (PromptNotFoundError, PromptStateConflictError) as error:
         raise_prompt_http_error(error)
+
+
+@router.get("/{prompt_id}/events")
+async def stream_prompt_events(
+    prompt_id: str,
+    service: PromptService = Depends(get_prompt_service),
+) -> StreamingResponse:
+    try:
+        service.get_prompt(prompt_id)
+    except PromptNotFoundError as error:
+        raise_prompt_http_error(error)
+
+    async def event_stream():
+        async for event in service.stream_prompt_events(prompt_id):
+            yield _sse_event(event)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     github_copilot_retry_backoff_multiplier: float = 2.0
     github_copilot_retry_max_backoff_seconds: float = 5.0
     github_copilot_fallback_model: str | None = None
+    github_copilot_orchestration_enabled: bool = True
     github_copilot_instructions: str = (
         "You are an assistant for a prompt operations board. "
         "Answer in Korean unless the user requests another language. "
