@@ -3,8 +3,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.prompts import router as prompts_router
 from app.api.routes import router
 from app.core.config import get_settings
+from app.database import get_database
 from app.services.agent import close_agent_service
 
 settings = get_settings()
@@ -12,6 +14,7 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    get_database().initialize()
     try:
         yield
     finally:
@@ -21,7 +24,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    description="Matdathon AI 에이전트 웹의 FastAPI 백엔드",
+    description="OnMyWay 프롬프트 실행 보드의 FastAPI 백엔드",
     lifespan=lifespan,
 )
 
@@ -34,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(prompts_router)
 
 
 @app.get("/", include_in_schema=False)

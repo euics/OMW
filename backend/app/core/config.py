@@ -7,11 +7,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
-    app_name: str = "Matdathon Agent API"
+    app_name: str = "OnMyWay Prompt API"
     app_env: str = "development"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     frontend_origin: str = "http://localhost:5173"
+    database_path: Path = PROJECT_ROOT / "backend" / "data" / "onmyway.db"
     github_copilot_model: str = "auto"
     github_copilot_timeout: float = 60.0
     github_copilot_log_level: str = "info"

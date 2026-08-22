@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Protocol
 
-from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
 from agent_framework.exceptions import AgentException
+from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
 
 from app.core.config import get_settings
 
@@ -44,6 +44,7 @@ class CopilotAgent(Protocol):
         message: str,
         *,
         session: CopilotSession,
+        options: GitHubCopilotOptions | None = None,
     ) -> CopilotResponse: ...
 
 
@@ -105,6 +106,7 @@ class CopilotAgentService:
         self,
         message: str,
         thread_id: str | None = None,
+        model: str | None = None,
     ) -> AgentResult:
         normalized = message.strip()
         if not normalized:
@@ -118,7 +120,12 @@ class CopilotAgentService:
         )
 
         try:
-            response = await self._agent.run(normalized, session=session)
+            options = GitHubCopilotOptions(model=model) if model else None
+            response = await self._agent.run(
+                normalized,
+                session=session,
+                options=options,
+            )
         except AgentException as exc:
             logger.exception("GitHub Copilot request failed")
             raise AgentServiceError(

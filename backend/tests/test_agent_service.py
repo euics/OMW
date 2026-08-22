@@ -36,6 +36,7 @@ class FakeCopilotAgent:
         message: str,
         *,
         session: FakeSession,
+        options: object | None = None,
     ) -> FakeResponse:
         if session.service_session_id is None:
             session.service_session_id = "generated-session"
