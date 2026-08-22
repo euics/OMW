@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -7,46 +6,40 @@ from app.database import Database
 from app.main import app
 from app.repositories.prompts import PromptRepository, PromptStateConflictError
 from app.schemas.prompt import PromptCreate
-from app.services.agent import AgentResult
+from app.services.agent import AgentResult, AgentServiceError
 from app.services.prompts import PromptService, get_prompt_service
 
 
 class StubPromptAgent:
-    async def reply(
-        self,
-        message: str,
-        thread_id: str | None = None,
-        model: str | None = None,
-    ) -> AgentResult:
-        return AgentResult(
-            reply="요청된 프롬프트의 실행 결과입니다.",
-            thread_id="prompt-thread",
-            provider="test",
-        )
+    async def reply(self, message: str) -> AgentResult:
+        return AgentResult(reply="요청된 프롬프트의 실행 결과입니다.")
+
+
+class FailingPromptAgent:
+    async def reply(self, message: str) -> AgentResult:
+        raise AgentServiceError("AI 요청에 실패했습니다.")
 
 
 def create_test_client(
-    database_path: Path,
+    database: Database,
+    agent: StubPromptAgent | FailingPromptAgent | None = None,
 ) -> tuple[TestClient, PromptService, PromptRepository]:
-    database = Database(database_path)
-    database.initialize()
     repository = PromptRepository(database)
     service = PromptService(
         repository=repository,
-        agent_service=StubPromptAgent(),
+        agent_service=agent or StubPromptAgent(),
     )
     app.dependency_overrides[get_prompt_service] = lambda: service
     return TestClient(app), service, repository
 
 
-def test_prompt_crud_without_user_data(tmp_path: Path) -> None:
-    client, _, _ = create_test_client(tmp_path / "prompts.db")
+def test_prompt_crud_without_user_data(database: Database) -> None:
+    client, _, _ = create_test_client(database)
     create_response = client.post(
         "/api/prompts",
         json={
             "title": "고객 피드백 요약",
             "prompt": "피드백의 핵심 이슈를 세 줄로 요약해 줘.",
-            "model": "auto",
             "outputFormat": "markdown",
         },
     )
@@ -56,16 +49,15 @@ def test_prompt_crud_without_user_data(tmp_path: Path) -> None:
     assert created["status"] == "draft"
     assert "userId" not in created
 
-    list_response = client.get("/api/prompts")
+    list_response = client.get("/api/prompts?status=draft")
     assert list_response.status_code == 200
-    assert [item["id"] for item in list_response.json()] == [created["id"]]
+    assert [item["id"] for item in list_response.json()["items"]] == [created["id"]]
 
     update_response = client.patch(
         f"/api/prompts/{created['id']}",
         json={
             "title": "수정된 요약",
             "prompt": "핵심 이슈를 다섯 줄로 요약해 줘.",
-            "model": "gpt-5.6-sol",
             "outputFormat": "plainText",
         },
     )
@@ -74,17 +66,32 @@ def test_prompt_crud_without_user_data(tmp_path: Path) -> None:
 
     delete_response = client.delete(f"/api/prompts/{created['id']}")
     assert delete_response.status_code == 204
-    assert client.get("/api/prompts").json() == []
+    assert client.get("/api/prompts?status=draft").json()["items"] == []
 
 
-def test_execute_prompt_persists_completed_response(tmp_path: Path) -> None:
-    client, _, _ = create_test_client(tmp_path / "execute.db")
+def test_client_cannot_select_ai_model(database: Database) -> None:
+    client, _, _ = create_test_client(database)
+
+    response = client.post(
+        "/api/prompts",
+        json={
+            "title": "모델 선택 시도",
+            "prompt": "모델은 백엔드가 선택해야 한다.",
+            "model": "gpt-5.6-sol",
+            "outputFormat": "markdown",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_execute_prompt_persists_completed_response(database: Database) -> None:
+    client, _, _ = create_test_client(database)
     created = client.post(
         "/api/prompts",
         json={
             "title": "실행 테스트",
             "prompt": "간단히 답해 줘.",
-            "model": "auto",
             "outputFormat": "markdown",
         },
     ).json()
@@ -93,11 +100,9 @@ def test_execute_prompt_persists_completed_response(tmp_path: Path) -> None:
 
     assert execute_response.status_code == 202
     assert execute_response.json()["status"] == "running"
-    assert execute_response.json()["executionState"] == "requesting"
 
-    stored = client.get("/api/prompts").json()[0]
+    stored = client.get("/api/prompts?status=completed").json()["items"][0]
     assert stored["status"] == "completed"
-    assert stored["executionState"] == "succeeded"
     assert stored["output"] == "요청된 프롬프트의 실행 결과입니다."
 
     conflict_response = client.patch(
@@ -105,15 +110,39 @@ def test_execute_prompt_persists_completed_response(tmp_path: Path) -> None:
         json={
             "title": "수정 불가",
             "prompt": "완료 후에는 수정할 수 없어야 한다.",
-            "model": "auto",
             "outputFormat": "markdown",
         },
     )
     assert conflict_response.status_code == 409
 
 
-def test_only_one_concurrent_execution_request_wins(tmp_path: Path) -> None:
-    _, _, repository = create_test_client(tmp_path / "concurrent.db")
+def test_failed_execution_moves_prompt_to_failed(database: Database) -> None:
+    client, _, _ = create_test_client(
+        database,
+        agent=FailingPromptAgent(),
+    )
+    created = client.post(
+        "/api/prompts",
+        json={
+            "title": "실패 테스트",
+            "prompt": "실패 상태를 저장해 줘.",
+            "outputFormat": "markdown",
+        },
+    ).json()
+
+    response = client.post(f"/api/prompts/{created['id']}/execute")
+
+    assert response.status_code == 202
+    stored = client.get("/api/prompts?status=failed").json()["items"][0]
+    assert stored["status"] == "failed"
+    assert stored["errorMessage"] == "AI 요청에 실패했습니다."
+
+    retry_response = client.post(f"/api/prompts/{created['id']}/execute")
+    assert retry_response.status_code == 202
+
+
+def test_only_one_concurrent_execution_request_wins(database: Database) -> None:
+    _, _, repository = create_test_client(database)
     prompt = repository.create(
         PromptCreate(
             title="동시 실행",
@@ -132,3 +161,51 @@ def test_only_one_concurrent_execution_request_wins(tmp_path: Path) -> None:
         results = list(executor.map(lambda _: queue(), range(2)))
 
     assert sorted(results) == ["conflict", "running"]
+
+
+def test_interrupted_execution_is_recovered_on_startup(database: Database) -> None:
+    _, _, repository = create_test_client(database)
+    prompt = repository.create(
+        PromptCreate(
+            title="중단 복구",
+            prompt="서버 재시작 후 다시 실행할 수 있어야 한다.",
+        )
+    )
+    repository.mark_running(prompt.id)
+
+    recovered_count = repository.recover_interrupted()
+    recovered = repository.get(prompt.id)
+
+    assert recovered_count == 1
+    assert recovered.status == "failed"
+    assert recovered.started_at is None
+    assert recovered.error_message
+
+
+def test_board_and_status_list_are_paginated(database: Database) -> None:
+    client, _, _ = create_test_client(database)
+    for index in range(5):
+        client.post(
+            "/api/prompts",
+            json={
+                "title": f"페이지 테스트 {index}",
+                "prompt": "페이지 단위로 조회되어야 한다.",
+                "outputFormat": "markdown",
+            },
+        )
+
+    first_page = client.get(
+        "/api/prompts?status=draft&page=1&pageSize=2"
+    ).json()
+    second_page = client.get(
+        "/api/prompts?status=draft&page=2&pageSize=2"
+    ).json()
+    board = client.get("/api/prompts/board?pageSize=2").json()
+
+    assert len(first_page["items"]) == 2
+    assert first_page["total"] == 5
+    assert first_page["totalPages"] == 3
+    assert first_page["hasNext"] is True
+    assert len(second_page["items"]) == 2
+    assert board["columns"]["draft"]["total"] == 5
+    assert set(board["columns"]) == {"draft", "running", "completed", "failed"}

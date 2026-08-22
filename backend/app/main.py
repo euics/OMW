@@ -7,6 +7,7 @@ from app.api.prompts import router as prompts_router
 from app.api.routes import router
 from app.core.config import get_settings
 from app.database import get_database
+from app.repositories.prompts import get_prompt_repository
 from app.services.agent import close_agent_service
 
 settings = get_settings()
@@ -15,6 +16,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     get_database().initialize()
+    get_prompt_repository().recover_interrupted()
     try:
         yield
     finally:

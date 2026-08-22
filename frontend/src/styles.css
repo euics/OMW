@@ -21,6 +21,7 @@
   --blue: #3478f6;
   --blue-soft: #e9f1ff;
   --danger: #d94a4a;
+  --danger-soft: #fff0f0;
   --shadow: 0 16px 44px rgba(26, 28, 40, 0.08);
 }
 
@@ -264,6 +265,7 @@ main {
   display: flex;
   min-height: 51px;
   align-items: center;
+  flex-wrap: wrap;
   gap: 18px;
   color: var(--muted);
   font-size: 10px;
@@ -296,6 +298,10 @@ main {
 
 .summary-dot.completed {
   background: var(--green);
+}
+
+.summary-dot.failed {
+  background: var(--danger);
 }
 
 .summary-divider {
@@ -363,7 +369,7 @@ main {
 
 .board-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(270px, 1fr));
+  grid-template-columns: repeat(4, minmax(260px, 1fr));
   gap: 13px;
 }
 
@@ -423,6 +429,11 @@ main {
 .column-completed .column-icon {
   color: var(--green);
   background: var(--green-soft);
+}
+
+.column-failed .column-icon {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .column-running .column-icon svg {
@@ -686,6 +697,15 @@ main {
   font-size: 9px;
 }
 
+.card-failed {
+  border-color: #edcccc;
+}
+
+.card-failed .card-type-icon {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .card-footer {
   margin-top: 14px;
   padding-top: 10px;
@@ -766,6 +786,10 @@ main {
   color: var(--green);
 }
 
+.column-failed .empty-illustration {
+  color: var(--danger);
+}
+
 .column-empty strong {
   color: #454752;
   font-size: 11px;
@@ -797,6 +821,27 @@ main {
 .empty-action:hover {
   border-color: var(--brand);
   background: var(--brand-soft);
+}
+
+.column-load-more {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #d7d9df;
+  border-radius: 8px;
+  color: #666a77;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.column-load-more:hover:not(:disabled) {
+  border-color: #bfc2cb;
+  background: #ffffff;
+}
+
+.column-load-more:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .drop-zone {
@@ -1123,12 +1168,6 @@ main {
   font-size: 8px;
 }
 
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
 .select-control {
   position: relative;
   display: flex;
@@ -1386,7 +1425,7 @@ main {
   }
 
   .board-grid {
-    min-width: 950px;
+    min-width: 1100px;
   }
 
   .board-section {
@@ -1444,8 +1483,8 @@ main {
   }
 
   .board-grid {
-    min-width: 870px;
-    grid-template-columns: repeat(3, 280px);
+    min-width: 1160px;
+    grid-template-columns: repeat(4, 280px);
   }
 
   .prompt-column {
@@ -1459,10 +1498,6 @@ main {
 
   .drawer-guide {
     margin-inline: 20px;
-  }
-
-  .form-grid {
-    grid-template-columns: 1fr;
   }
 
   .drawer-actions {

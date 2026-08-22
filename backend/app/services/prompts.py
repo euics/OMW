@@ -7,8 +7,11 @@ from typing import Protocol
 from app.repositories.prompts import PromptRepository, get_prompt_repository
 from app.schemas.prompt import (
     OutputFormat,
+    PromptBoard,
     PromptCreate,
+    PromptPage,
     PromptRead,
+    PromptStatus,
     PromptUpdate,
 )
 from app.services.agent import (
@@ -21,12 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentResponder(Protocol):
-    async def reply(
-        self,
-        message: str,
-        thread_id: str | None = None,
-        model: str | None = None,
-    ) -> AgentResult: ...
+    async def reply(self, message: str) -> AgentResult: ...
 
 
 OUTPUT_INSTRUCTIONS = {
@@ -45,8 +43,16 @@ class PromptService:
         self._repository = repository
         self._agent_service = agent_service
 
-    def list_prompts(self) -> list[PromptRead]:
-        return self._repository.list()
+    def list_prompts(
+        self,
+        prompt_status: PromptStatus,
+        page: int,
+        page_size: int,
+    ) -> PromptPage:
+        return self._repository.list_page(prompt_status, page, page_size)
+
+    def get_board(self, page_size: int) -> PromptBoard:
+        return self._repository.get_board(page_size)
 
     def create_prompt(self, payload: PromptCreate) -> PromptRead:
         return self._repository.create(payload)
@@ -61,7 +67,7 @@ class PromptService:
     def delete_prompt(self, prompt_id: str) -> None:
         self._repository.delete(prompt_id)
 
-    def queue_execution(self, prompt_id: str) -> PromptRead:
+    def start_execution(self, prompt_id: str) -> PromptRead:
         return self._repository.mark_running(prompt_id)
 
     async def run_execution(self, prompt_id: str) -> None:
@@ -72,14 +78,11 @@ class PromptService:
             f"사용자 프롬프트:\n{prompt.prompt}\n\n"
             f"응답 지침: {instruction}"
         )
-        model = None if prompt.model == "auto" else prompt.model
-
         try:
-            result = await self._agent_service.reply(request, model=model)
+            result = await self._agent_service.reply(request)
             self._repository.mark_completed(
                 prompt.id,
                 output=result.reply,
-                thread_id=result.thread_id,
             )
         except AgentServiceError as exc:
             logger.warning("Prompt execution failed for %s: %s", prompt.id, exc)

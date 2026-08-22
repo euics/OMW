@@ -1,4 +1,10 @@
-import type { PromptFormValues, PromptItem } from './types'
+import type {
+  PromptBoard,
+  PromptFormValues,
+  PromptItem,
+  PromptPage,
+  PromptStatus,
+} from './types'
 
 type ApiErrorBody = {
   detail?: string
@@ -45,7 +51,13 @@ async function request<T>(
 }
 
 export const promptApi = {
-  list: () => request<PromptItem[]>('/api/prompts'),
+  board: (pageSize: number) =>
+    request<PromptBoard>(`/api/prompts/board?pageSize=${pageSize}`),
+
+  list: (status: PromptStatus, page: number, pageSize: number) =>
+    request<PromptPage>(
+      `/api/prompts?status=${status}&page=${page}&pageSize=${pageSize}`,
+    ),
 
   create: (values: PromptFormValues) =>
     request<PromptItem>('/api/prompts', {

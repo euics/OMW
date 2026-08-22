@@ -1,10 +1,6 @@
 import type { DragEvent } from 'react'
 
-import {
-  MODEL_LABELS,
-  OUTPUT_FORMAT_LABELS,
-  type PromptItem,
-} from '../types'
+import { OUTPUT_FORMAT_LABELS, type PromptItem } from '../types'
 import { Icon } from './Icon'
 
 type PromptCardProps = {
@@ -33,16 +29,31 @@ export function PromptCard({
   onDragStart,
   onDragEnd,
 }: PromptCardProps) {
-  const isDraft = prompt.status === 'draft'
+  const canManage = prompt.status === 'draft' || prompt.status === 'failed'
+  const canRun = prompt.status === 'draft' || prompt.status === 'failed'
+  const timeLabel =
+    prompt.status === 'draft'
+      ? '수정됨'
+      : prompt.status === 'running'
+        ? '시작됨'
+        : prompt.status === 'completed'
+          ? '완료됨'
+          : '실패함'
+  const displayedTime =
+    prompt.status === 'running'
+      ? (prompt.startedAt ?? prompt.updatedAt)
+      : prompt.status === 'completed'
+        ? (prompt.completedAt ?? prompt.updatedAt)
+        : prompt.updatedAt
 
   return (
     <article
       className={`prompt-card card-${prompt.status} ${
         isDragging ? 'is-dragging' : ''
       }`}
-      draggable={isDraft}
-      onDragStart={isDraft ? onDragStart : undefined}
-      onDragEnd={isDraft ? onDragEnd : undefined}
+      draggable={canRun}
+      onDragStart={canRun ? onDragStart : undefined}
+      onDragEnd={canRun ? onDragEnd : undefined}
     >
       <div className="card-header">
         <div className="card-identity">
@@ -52,7 +63,7 @@ export function PromptCard({
           <span>PRM-{prompt.id.slice(0, 6).toUpperCase()}</span>
         </div>
 
-        {isDraft && (
+        {canManage && (
           <div className="card-actions">
             <button type="button" aria-label="수정" onClick={onEdit}>
               <Icon name="edit" size={15} />
@@ -73,7 +84,7 @@ export function PromptCard({
       <p className="prompt-preview">{prompt.prompt}</p>
 
       <div className="prompt-options">
-        <span>{MODEL_LABELS[prompt.model]}</span>
+        <span>AI 자동 선택</span>
         <i />
         <span>{OUTPUT_FORMAT_LABELS[prompt.outputFormat]}</span>
       </div>
@@ -101,17 +112,12 @@ export function PromptCard({
 
       <footer className="card-footer">
         <span>
-          {prompt.status === 'draft' ? '수정됨' : '시작됨'}{' '}
-          {dateFormatter.format(
-            prompt.status === 'draft'
-              ? prompt.updatedAt
-              : (prompt.startedAt ?? prompt.updatedAt),
-          )}
+          {timeLabel} {dateFormatter.format(displayedTime)}
         </span>
-        {isDraft ? (
+        {canRun ? (
           <button className="drag-hint" type="button" onClick={onRun}>
             <Icon name="send" size={13} />
-            실행
+            {prompt.status === 'failed' ? '재실행' : '실행'}
           </button>
         ) : (
           <span className={`card-status ${prompt.status}`}>

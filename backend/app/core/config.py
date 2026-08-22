@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -12,8 +13,13 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     frontend_origin: str = "http://localhost:5173"
-    database_path: Path = PROJECT_ROOT / "backend" / "data" / "onmyway.db"
+    database_host: str = "127.0.0.1"
+    database_port: int = 3306
+    database_name: str = "matdathon"
+    database_user: str = "matdathon"
+    database_password: SecretStr
     github_copilot_model: str = "auto"
+    github_copilot_token: SecretStr | None = None
     github_copilot_timeout: float = 60.0
     github_copilot_log_level: str = "info"
     github_copilot_cli_path: str | None = None

@@ -1,23 +1,15 @@
-export type PromptStatus = 'draft' | 'running' | 'completed'
-export type PromptModel = 'auto' | 'gpt-5.6-sol' | 'claude-sonnet-5'
+export type PromptStatus = 'draft' | 'running' | 'completed' | 'failed'
 export type OutputFormat = 'markdown' | 'plainText' | 'json'
-export type ExecutionState =
-  | 'idle'
-  | 'requesting'
-  | 'succeeded'
-  | 'failed'
 
 export type PromptFormValues = {
   title: string
   prompt: string
-  model: PromptModel
   outputFormat: OutputFormat
 }
 
 export type PromptItem = PromptFormValues & {
   id: string
   status: PromptStatus
-  executionState: ExecutionState
   createdAt: number
   updatedAt: number
   startedAt?: number
@@ -26,11 +18,25 @@ export type PromptItem = PromptFormValues & {
   errorMessage?: string
 }
 
-export const MODEL_LABELS: Record<PromptModel, string> = {
-  auto: '자동 선택',
-  'gpt-5.6-sol': 'GPT-5.6 Sol',
-  'claude-sonnet-5': 'Claude Sonnet 5',
+export type PromptPage = {
+  items: PromptItem[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+  hasNext: boolean
 }
+
+export type PromptBoard = {
+  columns: Record<PromptStatus, PromptPage>
+}
+
+export const PROMPT_STATUSES: PromptStatus[] = [
+  'draft',
+  'running',
+  'completed',
+  'failed',
+]
 
 export const OUTPUT_FORMAT_LABELS: Record<OutputFormat, string> = {
   markdown: 'Markdown',
@@ -41,6 +47,5 @@ export const OUTPUT_FORMAT_LABELS: Record<OutputFormat, string> = {
 export const EMPTY_PROMPT_FORM: PromptFormValues = {
   title: '',
   prompt: '',
-  model: 'auto',
   outputFormat: 'markdown',
 }

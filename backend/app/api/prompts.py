@@ -1,7 +1,22 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 
 from app.repositories.prompts import PromptNotFoundError, PromptStateConflictError
-from app.schemas.prompt import PromptCreate, PromptRead, PromptUpdate
+from app.schemas.prompt import (
+    PromptBoard,
+    PromptCreate,
+    PromptPage,
+    PromptRead,
+    PromptStatus,
+    PromptUpdate,
+)
 from app.services.prompts import PromptService, get_prompt_service
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
@@ -21,11 +36,22 @@ def raise_prompt_http_error(error: Exception) -> None:
     raise error
 
 
-@router.get("", response_model=list[PromptRead])
-def list_prompts(
+@router.get("/board", response_model=PromptBoard)
+def get_prompt_board(
+    page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
     service: PromptService = Depends(get_prompt_service),
-) -> list[PromptRead]:
-    return service.list_prompts()
+) -> PromptBoard:
+    return service.get_board(page_size)
+
+
+@router.get("", response_model=PromptPage)
+def list_prompts(
+    prompt_status: PromptStatus = Query(alias="status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
+    service: PromptService = Depends(get_prompt_service),
+) -> PromptPage:
+    return service.list_prompts(prompt_status, page, page_size)
 
 
 @router.post("", response_model=PromptRead, status_code=status.HTTP_201_CREATED)
@@ -71,7 +97,7 @@ def execute_prompt(
     service: PromptService = Depends(get_prompt_service),
 ) -> PromptRead:
     try:
-        prompt = service.queue_execution(prompt_id)
+        prompt = service.start_execution(prompt_id)
     except (PromptNotFoundError, PromptStateConflictError) as error:
         raise_prompt_http_error(error)
 

@@ -3,12 +3,10 @@ import type { FormEvent } from 'react'
 
 import {
   EMPTY_PROMPT_FORM,
-  MODEL_LABELS,
   OUTPUT_FORMAT_LABELS,
   type OutputFormat,
   type PromptFormValues,
   type PromptItem,
-  type PromptModel,
 } from '../types'
 import { Icon } from './Icon'
 
@@ -40,7 +38,6 @@ export function PromptComposer({
         ? {
             title: prompt.title,
             prompt: prompt.prompt,
-            model: prompt.model,
             outputFormat: prompt.outputFormat,
           }
         : EMPTY_PROMPT_FORM,
@@ -217,57 +214,31 @@ export function PromptComposer({
               <span>03</span>
               <div>
                 <strong>실행 옵션</strong>
-                <small>API 요청에 함께 전달될 설정입니다.</small>
+                <small>AI 모델은 백엔드가 자동으로 선택합니다.</small>
               </div>
             </div>
 
-            <div className="form-grid">
-              <label className="form-field">
-                <span>실행 모델</span>
-                <div className="select-control">
-                  <select
-                    value={values.model}
-                    onChange={(event) =>
-                      setValues((current) => ({
-                        ...current,
-                        model: event.target.value as PromptModel,
-                      }))
-                    }
-                  >
-                    {Object.entries(MODEL_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <Icon name="chevronDown" size={15} />
-                </div>
-              </label>
-
-              <label className="form-field">
-                <span>응답 형식</span>
-                <div className="select-control">
-                  <select
-                    value={values.outputFormat}
-                    onChange={(event) =>
-                      setValues((current) => ({
-                        ...current,
-                        outputFormat: event.target.value as OutputFormat,
-                      }))
-                    }
-                  >
-                    {Object.entries(OUTPUT_FORMAT_LABELS).map(
-                      ([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                  <Icon name="chevronDown" size={15} />
-                </div>
-              </label>
-            </div>
+            <label className="form-field">
+              <span>응답 형식</span>
+              <div className="select-control">
+                <select
+                  value={values.outputFormat}
+                  onChange={(event) =>
+                    setValues((current) => ({
+                      ...current,
+                      outputFormat: event.target.value as OutputFormat,
+                    }))
+                  }
+                >
+                  {Object.entries(OUTPUT_FORMAT_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <Icon name="chevronDown" size={15} />
+              </div>
+            </label>
           </div>
 
           <footer className="drawer-actions">

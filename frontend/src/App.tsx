@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import type { DragEvent } from 'react'
 
-import { Icon } from './features/prompt-board/components/Icon'
+import {
+  Icon,
+  type IconName,
+} from './features/prompt-board/components/Icon'
 import { PromptCard } from './features/prompt-board/components/PromptCard'
 import { PromptComposer } from './features/prompt-board/components/PromptComposer'
 import {
-  MODEL_LABELS,
   OUTPUT_FORMAT_LABELS,
   type PromptItem,
   type PromptStatus,
@@ -17,34 +19,63 @@ const columns: Array<{
   eyebrow: string
   title: string
   description: string
+  icon: IconName
+  emptyIcon: IconName
+  emptyTitle: string
+  emptyDescription: string
 }> = [
   {
     id: 'draft',
     eyebrow: 'READY',
     title: '미실행 프롬프트',
     description: '실행 전까지 내용을 자유롭게 편집할 수 있어요.',
+    icon: 'edit',
+    emptyIcon: 'prompt',
+    emptyTitle: '첫 프롬프트를 작성해 보세요',
+    emptyDescription: '저장한 프롬프트는 이곳에서 실행 전까지 관리됩니다.',
   },
   {
     id: 'running',
     eyebrow: 'PROCESSING',
     title: '진행중',
     description: 'API로 전달된 프롬프트의 응답을 기다립니다.',
+    icon: 'loader',
+    emptyIcon: 'send',
+    emptyTitle: '실행 중인 프롬프트가 없습니다',
+    emptyDescription: '미실행 카드를 이곳으로 드래그해 실행을 시작합니다.',
   },
   {
     id: 'completed',
     eyebrow: 'ARCHIVE',
     title: '완료',
     description: '응답이 도착하면 결과와 함께 자동 저장됩니다.',
+    icon: 'check',
+    emptyIcon: 'archive',
+    emptyTitle: '완료된 응답이 없습니다',
+    emptyDescription: '백엔드 응답이 완료되면 결과가 자동으로 표시됩니다.',
+  },
+  {
+    id: 'failed',
+    eyebrow: 'FAILED',
+    title: '실패',
+    description: '실패 원인을 확인하고 수정하거나 다시 실행할 수 있어요.',
+    icon: 'info',
+    emptyIcon: 'info',
+    emptyTitle: '실패한 프롬프트가 없습니다',
+    emptyDescription: '실행 오류가 발생하면 원인과 함께 이곳에 표시됩니다.',
   },
 ]
 
 function App() {
   const {
     prompts,
+    columns: promptColumns,
     isLoading,
     errorMessage,
+    loadingMoreStatus,
     clearError,
     refreshPrompts,
+    loadMore,
     createPrompt,
     updatePrompt,
     deletePrompt,
@@ -59,11 +90,16 @@ function App() {
 
   const counts = useMemo(
     () => ({
-      draft: prompts.filter((prompt) => prompt.status === 'draft').length,
-      running: prompts.filter((prompt) => prompt.status === 'running').length,
-      completed: prompts.filter((prompt) => prompt.status === 'completed').length,
+      draft: promptColumns.draft.total,
+      running: promptColumns.running.total,
+      completed: promptColumns.completed.total,
+      failed: promptColumns.failed.total,
     }),
-    [prompts],
+    [promptColumns],
+  )
+  const totalCount = Object.values(promptColumns).reduce(
+    (total, page) => total + page.total,
+    0,
   )
 
   const openNewPrompt = () => {
@@ -86,7 +122,9 @@ function App() {
     const promptId =
       event.dataTransfer.getData('text/plain') || draggedPromptId
     const prompt = prompts.find(
-      (item) => item.id === promptId && item.status === 'draft',
+      (item) =>
+        item.id === promptId &&
+        (item.status === 'draft' || item.status === 'failed'),
     )
 
     setRunningDropActive(false)
@@ -160,7 +198,7 @@ function App() {
             <div>
               <div className="board-title-row">
                 <h2>실행 보드</h2>
-                <span className="total-count">{prompts.length}</span>
+                <span className="total-count">{totalCount}</span>
               </div>
               <p>카드를 진행중 열로 드래그하면 실행 흐름이 시작됩니다.</p>
             </div>
@@ -186,10 +224,14 @@ function App() {
               <span className="summary-dot completed" />
               완료 <strong>{counts.completed}</strong>
             </div>
+            <div>
+              <span className="summary-dot failed" />
+              실패 <strong>{counts.failed}</strong>
+            </div>
             <span className="summary-divider" />
             <div className="api-readiness">
               <Icon name="plug" size={14} />
-              SQLite 저장
+              MySQL 저장
             </div>
           </div>
 
@@ -214,9 +256,8 @@ function App() {
 
           <div className="board-grid">
             {columns.map((column) => {
-              const columnPrompts = prompts.filter(
-                (prompt) => prompt.status === column.id,
-              )
+              const page = promptColumns[column.id]
+              const columnPrompts = page.items
               const acceptsDrop = column.id === 'running' && Boolean(draggedPromptId)
 
               return (
@@ -256,23 +297,14 @@ function App() {
                   <header className="column-heading">
                     <div className="column-title">
                       <span className="column-icon">
-                        <Icon
-                          name={
-                            column.id === 'draft'
-                              ? 'edit'
-                              : column.id === 'running'
-                                ? 'loader'
-                                : 'check'
-                          }
-                          size={16}
-                        />
+                        <Icon name={column.icon} size={16} />
                       </span>
                       <div>
                         <span>{column.eyebrow}</span>
                         <h3>{column.title}</h3>
                       </div>
                     </div>
-                    <span className="column-count">{columnPrompts.length}</span>
+                    <span className="column-count">{page.total}</span>
                   </header>
                   <p className="column-description">{column.description}</p>
 
@@ -308,34 +340,17 @@ function App() {
                     {columnPrompts.length === 0 && (
                       <div className="column-empty">
                         <span className="empty-illustration">
-                          <Icon
-                            name={
-                              column.id === 'draft'
-                                ? 'prompt'
-                                : column.id === 'running'
-                                  ? 'send'
-                                  : 'archive'
-                            }
-                            size={25}
-                          />
+                          <Icon name={column.emptyIcon} size={25} />
                         </span>
                         <strong>
                           {isLoading
                             ? '프롬프트를 불러오는 중입니다'
-                            : column.id === 'draft'
-                              ? '첫 프롬프트를 작성해 보세요'
-                              : column.id === 'running'
-                                ? '실행 중인 프롬프트가 없습니다'
-                                : '완료된 응답이 없습니다'}
+                            : column.emptyTitle}
                         </strong>
                         <p>
                           {isLoading
                             ? '저장된 데이터를 확인하고 있어요.'
-                            : column.id === 'draft'
-                              ? '저장한 프롬프트는 이곳에서 실행 전까지 관리됩니다.'
-                              : column.id === 'running'
-                                ? '미실행 카드를 이곳으로 드래그해 실행을 시작합니다.'
-                                : '백엔드 응답이 완료되면 결과가 자동으로 표시됩니다.'}
+                            : column.emptyDescription}
                         </p>
                         {!isLoading && column.id === 'draft' && (
                           <button
@@ -347,7 +362,23 @@ function App() {
                             프롬프트 만들기
                           </button>
                         )}
+
                       </div>
+                    )}
+
+                    {page.hasNext && (
+                      <button
+                        className="column-load-more"
+                        type="button"
+                        disabled={loadingMoreStatus !== null}
+                        onClick={() => {
+                          void loadMore(column.id).catch(() => undefined)
+                        }}
+                      >
+                        {loadingMoreStatus === column.id
+                          ? '불러오는 중...'
+                          : `더 보기 (${columnPrompts.length}/${page.total})`}
+                      </button>
                     )}
                   </div>
 
@@ -428,7 +459,7 @@ function App() {
               <dl>
                 <div>
                   <dt>모델</dt>
-                  <dd>{MODEL_LABELS[pendingRun.model]}</dd>
+                  <dd>백엔드 자동 선택</dd>
                 </div>
                 <div>
                   <dt>응답 형식</dt>

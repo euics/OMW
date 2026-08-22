@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -14,6 +13,7 @@ def to_camel(value: str) -> str:
 class ApiModel(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
+        extra="forbid",
         populate_by_name=True,
         use_enum_values=True,
     )
@@ -23,19 +23,7 @@ class PromptStatus(str, Enum):
     DRAFT = "draft"
     RUNNING = "running"
     COMPLETED = "completed"
-
-
-class ExecutionState(str, Enum):
-    IDLE = "idle"
-    REQUESTING = "requesting"
-    SUCCEEDED = "succeeded"
     FAILED = "failed"
-
-
-class PromptModel(str, Enum):
-    AUTO = "auto"
-    GPT_5_6_SOL = "gpt-5.6-sol"
-    CLAUDE_SONNET_5 = "claude-sonnet-5"
 
 
 class OutputFormat(str, Enum):
@@ -47,7 +35,6 @@ class OutputFormat(str, Enum):
 class PromptWrite(ApiModel):
     title: str = Field(min_length=1, max_length=80)
     prompt: str = Field(min_length=1, max_length=4000)
-    model: PromptModel = PromptModel.AUTO
     output_format: OutputFormat = OutputFormat.MARKDOWN
 
     @field_validator("title", "prompt")
@@ -70,10 +57,22 @@ class PromptUpdate(PromptWrite):
 class PromptRead(PromptWrite):
     id: str
     status: PromptStatus
-    execution_state: ExecutionState
-    output: Optional[str] = None
-    error_message: Optional[str] = None
+    output: str | None = None
+    error_message: str | None = None
     created_at: int
     updated_at: int
-    started_at: Optional[int] = None
-    completed_at: Optional[int] = None
+    started_at: int | None = None
+    completed_at: int | None = None
+
+
+class PromptPage(ApiModel):
+    items: list[PromptRead]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+    has_next: bool
+
+
+class PromptBoard(ApiModel):
+    columns: dict[PromptStatus, PromptPage]

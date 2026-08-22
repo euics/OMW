@@ -8,6 +8,7 @@ from typing import Protocol
 
 from agent_framework.exceptions import AgentException
 from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
+from copilot import CopilotClient
 
 from app.core.config import get_settings
 
@@ -17,12 +18,10 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class AgentResult:
     reply: str
-    thread_id: str
-    provider: str
 
 
 class CopilotSession(Protocol):
-    service_session_id: str | None
+    pass
 
 
 class CopilotResponse(Protocol):
@@ -37,14 +36,11 @@ class CopilotAgent(Protocol):
 
     def create_session(self) -> CopilotSession: ...
 
-    def get_session(self, *, service_session_id: str) -> CopilotSession: ...
-
     async def run(
         self,
         message: str,
         *,
         session: CopilotSession,
-        options: GitHubCopilotOptions | None = None,
     ) -> CopilotResponse: ...
 
 
@@ -55,8 +51,6 @@ class AgentServiceError(RuntimeError):
 class CopilotAgentService:
     """Microsoft Agent Framework service backed by the GitHub Copilot SDK."""
 
-    provider = "microsoft-agent-framework/github-copilot-sdk"
-
     def __init__(
         self,
         *,
@@ -65,6 +59,7 @@ class CopilotAgentService:
         log_level: str,
         instructions: str,
         cli_path: str | None = None,
+        token: str | None = None,
         agent: CopilotAgent | None = None,
     ) -> None:
         options = GitHubCopilotOptions(
@@ -75,7 +70,9 @@ class CopilotAgentService:
         if cli_path:
             options["cli_path"] = cli_path
 
+        self._client = CopilotClient(github_token=token) if token else None
         self._agent: CopilotAgent = agent or GitHubCopilotAgent(
+            client=self._client,
             name="PromptExecutionAgent",
             description="Executes prompts submitted from the prompt operations board.",
             instructions=instructions,
@@ -105,26 +102,18 @@ class CopilotAgentService:
     async def reply(
         self,
         message: str,
-        thread_id: str | None = None,
-        model: str | None = None,
     ) -> AgentResult:
         normalized = message.strip()
         if not normalized:
             raise ValueError("message must not be blank")
 
         await self._ensure_started()
-        session = (
-            self._agent.get_session(service_session_id=thread_id)
-            if thread_id
-            else self._agent.create_session()
-        )
+        session = self._agent.create_session()
 
         try:
-            options = GitHubCopilotOptions(model=model) if model else None
             response = await self._agent.run(
                 normalized,
                 session=session,
-                options=options,
             )
         except AgentException as exc:
             logger.exception("GitHub Copilot request failed")
@@ -132,25 +121,19 @@ class CopilotAgentService:
                 "GitHub Copilot 요청에 실패했습니다. 인증 상태와 모델 설정을 확인해 주세요."
             ) from exc
 
-        active_thread_id = session.service_session_id
-        if not isinstance(active_thread_id, str) or not active_thread_id:
-            raise AgentServiceError("GitHub Copilot이 세션 ID를 반환하지 않았습니다.")
-
         reply = response.text.strip()
         if not reply:
             raise AgentServiceError("GitHub Copilot이 빈 응답을 반환했습니다.")
 
-        return AgentResult(
-            reply=reply,
-            thread_id=active_thread_id,
-            provider=self.provider,
-        )
+        return AgentResult(reply=reply)
 
     async def close(self) -> None:
         if not self._started:
             return
 
         await self._agent.stop()
+        if self._client:
+            await self._client.stop()
         self._started = False
 
 
@@ -162,6 +145,11 @@ def get_agent_service() -> CopilotAgentService:
         timeout=settings.github_copilot_timeout,
         log_level=settings.github_copilot_log_level,
         cli_path=settings.github_copilot_cli_path,
+        token=(
+            settings.github_copilot_token.get_secret_value()
+            if settings.github_copilot_token
+            else None
+        ),
         instructions=settings.github_copilot_instructions,
     )
 
