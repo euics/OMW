@@ -55,14 +55,15 @@ class PromptUpdate(PromptWrite):
 
 
 class PromptRead(PromptWrite):
+    output_format: OutputFormat
     id: str
     status: PromptStatus
-    output: str | None = None
-    error_message: str | None = None
+    output: str | None
+    error_message: str | None
     created_at: int
     updated_at: int
-    started_at: int | None = None
-    completed_at: int | None = None
+    started_at: int | None
+    completed_at: int | None
 
 
 class PromptPage(ApiModel):

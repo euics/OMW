@@ -1,13 +1,17 @@
 import type {
   PromptBoard,
-  PromptFormValues,
   PromptItem,
   PromptPage,
   PromptStatus,
+  PromptWriteRequest,
 } from './types'
 
+type ApiValidationError = {
+  msg: string
+}
+
 type ApiErrorBody = {
-  detail?: string
+  detail?: string | ApiValidationError[]
 }
 
 export class PromptApiError extends Error {
@@ -36,7 +40,11 @@ async function request<T>(
     let message = '요청을 처리하지 못했습니다.'
     try {
       const body = (await response.json()) as ApiErrorBody
-      if (body.detail) message = body.detail
+      if (typeof body.detail === 'string') {
+        message = body.detail
+      } else if (Array.isArray(body.detail) && body.detail[0]?.msg) {
+        message = body.detail[0].msg
+      }
     } catch {
       message = `요청을 처리하지 못했습니다. (${response.status})`
     }
@@ -59,13 +67,13 @@ export const promptApi = {
       `/api/prompts?status=${status}&page=${page}&pageSize=${pageSize}`,
     ),
 
-  create: (values: PromptFormValues) =>
+  create: (values: PromptWriteRequest) =>
     request<PromptItem>('/api/prompts', {
       method: 'POST',
       body: JSON.stringify(values),
     }),
 
-  update: (id: string, values: PromptFormValues) =>
+  update: (id: string, values: PromptWriteRequest) =>
     request<PromptItem>(`/api/prompts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(values),

@@ -7,15 +7,21 @@ export type PromptFormValues = {
   outputFormat: OutputFormat
 }
 
+export type PromptWriteRequest = {
+  title: string
+  prompt: string
+  outputFormat?: OutputFormat
+}
+
 export type PromptItem = PromptFormValues & {
   id: string
   status: PromptStatus
   createdAt: number
   updatedAt: number
-  startedAt?: number
-  completedAt?: number
-  output?: string
-  errorMessage?: string
+  startedAt: number | null
+  completedAt: number | null
+  output: string | null
+  errorMessage: string | null
 }
 
 export type PromptPage = {
