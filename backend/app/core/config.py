@@ -13,10 +13,10 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     frontend_origin: str = "http://localhost:5173"
-    database_host: str = "127.0.0.1"
+    database_host: str = "onmyway-mysql"
     database_port: int = 3306
     database_name: str = "matdathon"
-    database_user: str = "matdathon"
+    database_user: str = "omw"
     database_password: SecretStr
     github_copilot_model: str = "auto"
     github_copilot_token: SecretStr | None = None
