@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
+from app.api import prompts as prompts_api
 from app.database import Database
 from app.main import app
 from app.repositories.prompts import PromptRepository, PromptStateConflictError
@@ -20,9 +21,14 @@ class FailingPromptAgent:
         raise AgentServiceError("AI 요청에 실패했습니다.")
 
 
+class InvalidJsonPromptAgent:
+    async def reply(self, message: str) -> AgentResult:
+        return AgentResult(reply="JSON 형식이 아닌 응답")
+
+
 def create_test_client(
     database: Database,
-    agent: StubPromptAgent | FailingPromptAgent | None = None,
+    agent: StubPromptAgent | FailingPromptAgent | InvalidJsonPromptAgent | None = None,
 ) -> tuple[TestClient, PromptService, PromptRepository]:
     repository = PromptRepository(database)
     service = PromptService(
@@ -139,6 +145,44 @@ def test_failed_execution_moves_prompt_to_failed(database: Database) -> None:
 
     retry_response = client.post(f"/api/prompts/{created['id']}/execute")
     assert retry_response.status_code == 202
+
+
+def test_invalid_json_execution_moves_prompt_to_failed(database: Database) -> None:
+    client, _, _ = create_test_client(
+        database,
+        agent=InvalidJsonPromptAgent(),
+    )
+    created = client.post(
+        "/api/prompts",
+        json={
+            "title": "JSON 검증",
+            "prompt": "JSON으로 답해 줘.",
+            "outputFormat": "json",
+        },
+    ).json()
+
+    response = client.post(f"/api/prompts/{created['id']}/execute")
+
+    assert response.status_code == 202
+    stored = client.get("/api/prompts?status=failed").json()["items"][0]
+    assert stored["status"] == "failed"
+    assert "유효한 JSON" in stored["errorMessage"]
+
+
+def test_execute_prompt_is_rate_limited(database: Database) -> None:
+    client, _, _ = create_test_client(database)
+    prompts_api.execution_rate_limiter.reset()
+    try:
+        for _ in range(prompts_api.execution_rate_limiter.limit):
+            response = client.post("/api/prompts/missing/execute")
+            assert response.status_code == 404
+
+        response = client.post("/api/prompts/missing/execute")
+
+        assert response.status_code == 429
+        assert int(response.headers["Retry-After"]) > 0
+    finally:
+        prompts_api.execution_rate_limiter.reset()
 
 
 def test_only_one_concurrent_execution_request_wins(database: Database) -> None:

@@ -4,7 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Protocol
+from typing import Protocol, cast
 
 from agent_framework.exceptions import AgentException
 from agent_framework.github import GitHubCopilotAgent, GitHubCopilotOptions
@@ -62,10 +62,14 @@ class CopilotAgentService:
         token: str | None = None,
         agent: CopilotAgent | None = None,
     ) -> None:
-        options = GitHubCopilotOptions(
-            model=model,
-            timeout=timeout,
-            log_level=log_level,
+        options = cast(
+            GitHubCopilotOptions,
+            {
+                "model": model,
+                "timeout": timeout,
+                "log_level": log_level,
+                "available_tools": [],
+            },
         )
         if cli_path:
             options["cli_path"] = cli_path

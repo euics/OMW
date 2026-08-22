@@ -101,7 +101,7 @@ export function PromptCard({
 
       {prompt.status === 'completed' && prompt.output && (
         <div className="result-preview">
-          <span>응답 결과</span>
+          <span>GitHub Copilot 생성 결과</span>
           <p>{prompt.output}</p>
         </div>
       )}

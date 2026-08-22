@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { promptApi } from './api'
 import {
@@ -73,6 +73,10 @@ function getErrorMessage(error: unknown): string {
     : '프롬프트 데이터를 처리하지 못했습니다.'
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
 export function usePromptBoard() {
   const [columns, setColumns] =
     useState<Record<PromptStatus, PromptPage>>(emptyColumns)
@@ -82,28 +86,37 @@ export function usePromptBoard() {
     useState<PromptStatus | null>(null)
   const [isAwaitingExecutionRefresh, setAwaitingExecutionRefresh] =
     useState(false)
+  const refreshControllerRef = useRef<AbortController | null>(null)
   const prompts = PROMPT_STATUSES.flatMap((status) => columns[status].items)
   const hasRunningPrompt = columns.running.total > 0
 
   const refreshPrompts = useCallback(async (showLoading = false) => {
+    refreshControllerRef.current?.abort()
+    const controller = new AbortController()
+    refreshControllerRef.current = controller
     if (showLoading) setIsLoading(true)
     try {
-      const board = await promptApi.board(PAGE_SIZE)
+      const board = await promptApi.board(PAGE_SIZE, controller.signal)
       setColumns((current) =>
         showLoading ? board.columns : mergeColumns(current, board.columns),
       )
       setAwaitingExecutionRefresh(false)
       setErrorMessage(null)
     } catch (error) {
+      if (isAbortError(error)) return
       setErrorMessage(getErrorMessage(error))
       throw error
     } finally {
-      if (showLoading) setIsLoading(false)
+      if (refreshControllerRef.current === controller) {
+        refreshControllerRef.current = null
+        if (showLoading) setIsLoading(false)
+      }
     }
   }, [])
 
   useEffect(() => {
     void refreshPrompts(true).catch(() => undefined)
+    return () => refreshControllerRef.current?.abort()
   }, [refreshPrompts])
 
   useEffect(() => {
